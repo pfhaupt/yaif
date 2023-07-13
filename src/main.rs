@@ -1,19 +1,13 @@
-use yaif::Matrix;
+use yaif::nn::NN;
 
 
 fn main() {
-    let mut m1 = Matrix::new(2, 2);
-    let mut m2 = Matrix::new(2, 2);
-    m1.set_unchecked(0, 0, 9.0);
-    m1.set_unchecked(1, 0, 8.0);
-    m1.set_unchecked(0, 1, 10.0);
-    m1.set_unchecked(1, 1, 9.0);
-    
-    m2.set_unchecked(0, 0, 8.0);
-    m2.set_unchecked(1, 0, 8.0);
-    m2.set_unchecked(0, 1, 10.0);
-    m2.set_unchecked(1, 1, 8.0);
-
-    let m3 = m1.multiply(&m2).unwrap();
-    println!("{:?}", m3);
+    let nn = NN::new(vec![10, 3]);
+    if nn.is_ok() {
+        let nn = nn.unwrap();
+        println!("{:?}", nn);
+    }
+    else {
+        println!("{:?}", nn.unwrap_err());
+    }
 }

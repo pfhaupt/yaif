@@ -1,19 +1,26 @@
-
-#[derive(PartialEq, Debug)]
+use rand_distr::{Normal, Distribution};
+#[derive(PartialEq, Debug, Clone, Default)]
 pub struct Matrix {
     rows: usize,
     cols: usize,
+    size: usize,
     content: Vec<f32>
 }
 
 impl Matrix {
     pub fn new(rows: usize, cols: usize) -> Self {
         let content = vec![0.0; rows * cols];
-        Matrix { rows, cols, content }
+        let size = rows * cols;
+        Matrix { rows, cols, size, content }
     }
 
     pub fn clone(&self) -> Self {
-        Matrix { rows: self.rows, cols: self.cols, content: self.content.clone() }
+        Matrix { rows: self.rows, cols: self.cols, size: self.size, content: self.content.clone() }
+    }
+
+    #[inline]
+    pub fn get_dim(&self) -> (usize, usize) {
+        (self.rows, self.cols)
     }
 
     #[inline]
@@ -50,6 +57,23 @@ impl Matrix {
     pub fn set_unchecked(&mut self, x: usize, y: usize, val: f32) {
         let i = self.get_index(x, y);
         self.content[i] = val;
+    }
+
+    pub fn fill(&mut self, val: f32) {
+        for x in 0..self.rows {
+            for y in 0..self.cols {
+                self.set_unchecked(x, y, val);
+            }
+        }
+    }
+
+    pub fn gaussian_fill(&mut self, mean: f32, variance: f32) {
+        let normal = Normal::new(mean, variance).unwrap();
+        for x in 0..self.rows {
+            for y in 0..self.cols {
+                self.set_unchecked(x, y, normal.sample(&mut rand::thread_rng()));
+            }
+        }
     }
 
     pub fn add(&self, other: &Matrix) -> Result<Self, &str> {
@@ -126,7 +150,7 @@ mod tests {
             let c = rand::thread_rng().gen_range(0..100);
 
             let result = Matrix::new(r, c);
-            assert_eq!(result, Matrix { rows: r, cols: c, content: vec![0.0; r * c] });
+            assert_eq!(result, Matrix { rows: r, cols: c, size: r * c, content: vec![0.0; r * c] });
         }
     }
 

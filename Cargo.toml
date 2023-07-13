@@ -15,3 +15,4 @@ path = "src/main.rs"
 
 [dependencies]
 rand = "0.8.5"
+rand_distr = "0.4.3"
