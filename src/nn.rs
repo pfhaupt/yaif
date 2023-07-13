@@ -38,6 +38,7 @@ impl NN {
             let mut result: NN = Default::default();
             result.initialize_layers(layer_sizes);
             result.initialize_network();
+            println!("Initialized a Neural Network!\n{:?}", result);
             Ok(result)
         }
     }
@@ -128,7 +129,8 @@ impl NN {
             self.weight_gradient[i] = self.errors[i].dyadic_product(&self.transposed_layers[i - 1]).unwrap();
         }
 
-        for i in 0..self.layer_count {
+        for i in 1..self.layer_count {
+            // Skipping layer 0 because there's no gradients there
             self.bias_gradient[i] = self.errors[i].clone();
         }
 
@@ -139,15 +141,45 @@ impl NN {
     }
 
     fn calculate_cost(&mut self) {
-        unimplemented!("calculate_cost");
+        self.current_cost = self.layers[self.last_layer].sub(&self.target_vector).unwrap();
     }
 
     fn calculate_layer(&mut self, layer: usize) {
-        unimplemented!("calculate_layer");
+        self.pre_activation[layer] = self.weights[layer].multiply(&self.layers[layer - 1]).unwrap();
+        self.pre_activation[layer] = self.pre_activation[layer].add(&self.bias[layer]).unwrap();
+        self.calculate_activation(layer);
     }
 
-    fn derivative_activation(&mut self, layer: usize) -> Matrix {
-        unimplemented!("derivative activation");
+    fn calculate_activation(&mut self, layer: usize) {
+        let (r, c) = self.pre_activation[layer].get_dim();
+        for x in 0..r {
+            for y in 0..c {
+                let v = self.pre_activation[layer].get(x, y).unwrap();
+                let v = self.sigmoid(v);
+                self.layers[layer].set(x, y, v).unwrap();
+            }
+        }
+    }
+
+    fn derivative_activation(&mut self, curr_layer: usize) -> Matrix {
+        let layer = &self.pre_activation[curr_layer];
+        let (r, c) = layer.get_dim();
+        let mut result = Matrix::new(r, c);
+        for x in 0..r {
+            for y in 0..c {
+                result.set(x, y, self.sigmoid_derivative(layer.get(x, y).unwrap())).unwrap();
+            }
+        }
+        result
+    }
+
+    fn sigmoid(self: &Self, val: f32) -> f32 {
+        1.0 /  (1.0 + (-val).exp())
+    }
+
+    fn sigmoid_derivative(self: &Self, val: f32) -> f32 {
+        let t = self.sigmoid(val);
+        t * (1.0 - t)
     }
 }
 
