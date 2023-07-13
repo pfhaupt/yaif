@@ -102,6 +102,53 @@ impl NN {
             self.weight_gradient[i] = Matrix::new(w_row, w_col);
         }
     }
+
+    pub fn learn(&mut self) {
+        // Feedforward
+        for i in 1..self.layer_count {
+            self.calculate_layer(i);
+        }
+
+        self.calculate_cost();
+
+        let activated = self.derivative_activation(self.last_layer);
+        self.errors[self.last_layer] = self.current_cost.hadamard_product(&activated).unwrap();
+
+        // Backpropagate
+        for i in (1..(self.layer_count - 1)).rev() {
+            self.transposed_weights[i + 1] = self.weights[i + 1].transpose();
+            self.errors[i] = self.transposed_weights[i + 1].multiply(&self.errors[i + 1]).unwrap();
+            let activated = self.derivative_activation(i);
+            self.errors[i] = self.errors[i].hadamard_product(&activated).unwrap();
+        }
+
+        // Gradiant Weights
+        for i in 1..self.weights.len() {
+            self.transposed_layers[i - 1] = self.layers[i - 1].transpose();
+            self.weight_gradient[i] = self.errors[i].dyadic_product(&self.transposed_layers[i - 1]).unwrap();
+        }
+
+        for i in 0..self.layer_count {
+            self.bias_gradient[i] = self.errors[i].clone();
+        }
+
+        for i in 0..self.layer_count {
+            self.avg_bias[i] = self.avg_bias[i].add(&self.bias_gradient[i]).unwrap();
+            self.avg_weight[i] = self.avg_weight[i].add(&self.weight_gradient[i]).unwrap();
+        }
+    }
+
+    fn calculate_cost(&mut self) {
+        unimplemented!("calculate_cost");
+    }
+
+    fn calculate_layer(&mut self, layer: usize) {
+        unimplemented!("calculate_layer");
+    }
+
+    fn derivative_activation(&mut self, layer: usize) -> Matrix {
+        unimplemented!("derivative activation");
+    }
 }
 
 
@@ -136,7 +183,7 @@ mod tests {
 
             let one_layer = NN::new(vec![0]);
             assert_eq!(one_layer.err().unwrap(), "Network only has one layer.");
-            
+
             let no_layer = NN::new(vec![]);
             assert_eq!(no_layer.err().unwrap(), "Network has no layers.");
         }

@@ -136,6 +136,66 @@ impl Matrix {
             }
         }
     }
+
+    pub fn transpose(self: &Matrix) -> Matrix {
+        let mut result = Matrix::new(self.cols, self.rows);
+        let r = self.rows;
+        let c = self.cols;
+        for i in 0..r {
+            for j in 0..c {
+                result.content[j * r + i] = self.content[i * c + j];
+            }
+        }
+        result
+    }
+
+    pub fn multiply_in_place(first: &Matrix, second: &Matrix, target: &mut Matrix) {
+        if first.cols != second.rows {
+            panic!("Mismatch in dimensions in multiply_in_place!");
+        }
+        let m = first.rows;
+        let n = first.cols;
+        let p = second.cols;
+        for i in 0..m {
+            for j in 0..p {
+                let mut s = 0.0;
+                for k in 0..n {
+                    s += first.get_unchecked(i, k) * second.get_unchecked(k, j);
+                }
+                target.set_unchecked(i, j, s);
+            }
+        }
+    }
+
+    pub fn hadamard_product(self: &Matrix, second: &Matrix) -> Result<Matrix, &'static str> {
+        if self.rows != second.rows || self.cols != second.cols {
+            Err("Mismatch in dimensions at hadamard_in_place!")
+        } else {
+            let mut target = Matrix::new(self.rows, self.cols);
+            for x in 0..self.rows {
+                for y in 0..self.cols {
+                    let val = self.get_unchecked(x, y) * second.get_unchecked(x, y);
+                    target.set_unchecked(x, y, val);
+                }
+            }
+            Ok(target)
+        }
+    }
+    
+    pub fn dyadic_product(self: &Matrix, second: &Matrix) -> Result<Matrix, &'static str> {
+        if self.cols != 1 || second.rows != 1 {
+            Err("Mismatch in dimensions at dyadic_in_place!")
+        } else {
+            let mut target = Matrix::new(self.rows, second.cols);
+            for i in 0..self.rows {
+                for j in 0..second.cols {
+                    let val = self.content[i] * second.content[j];
+                    target.set_unchecked(i, j, val);
+                }
+            }
+            Ok(target)
+        }
+    }
 }
 
 #[cfg(test)]
