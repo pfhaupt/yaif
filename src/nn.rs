@@ -1,5 +1,13 @@
 use super::matrix::Matrix;
+use super::data_set::DataSet;
 use std::fmt::{ Debug, Formatter };
+
+const LEARN_FACTOR: f32 = 0.005;
+const REGULATION_FACTOR: f32 = 1e-11;
+const LEARN_REG_BATCH_FACTOR: f32 = 1.0;
+const TARGET_ACCURACY: f32 = 0.95;
+const FLOATING_WEIGHT: f32 = 0.0;
+const VALIDATION_SIZE: usize = 2_500;
 
 #[derive(Default)]
 pub struct NN {
@@ -26,7 +34,10 @@ pub struct NN {
     // For Validation
     target_vector: Matrix,
     current_cost: Matrix,
-    floating_average: f32
+    floating_average: f32,
+
+    // Training Data
+    data: DataSet
 }
 
 impl Debug for NN {
@@ -37,25 +48,25 @@ impl Debug for NN {
         for i in 0..self.layer_count {
             fmt_str.push_str(&format!("\nLayer {}:\n", i));
             let m = &self.layers[i];
-            fmt_str.push_str(&format!("Layer dim: {:?}\n", m.get_dim()));
+            fmt_str.push_str(&format!("Layer: {:?}\n", m));
             let m = &self.transposed_layers[i];
-            fmt_str.push_str(&format!("Transposed Layer dim: {:?}\n", m.get_dim()));
+            fmt_str.push_str(&format!("Transposed Layer: {:?}\n", m));
             let m = &self.errors[i];
-            fmt_str.push_str(&format!("Errors dim: {:?}\n", m.get_dim()));
+            fmt_str.push_str(&format!("Errors: {:?}\n", m));
             let m = &self.weights[i];
-            fmt_str.push_str(&format!("Weights dim: {:?}\n", m.get_dim()));
+            fmt_str.push_str(&format!("Weights: {:?}\n", m));
             let m = &self.transposed_weights[i];
-            fmt_str.push_str(&format!("Transposed Weights dim: {:?}\n", m.get_dim()));
+            fmt_str.push_str(&format!("Transposed Weights: {:?}\n", m));
             let m = &self.bias[i];
-            fmt_str.push_str(&format!("Bias dim: {:?}\n", m.get_dim()));
+            fmt_str.push_str(&format!("Bias: {:?}\n", m));
             let m = &self.avg_bias[i];
-            fmt_str.push_str(&format!("Avg Bias dim: {:?}\n", m.get_dim()));
+            fmt_str.push_str(&format!("Avg Bias: {:?}\n", m));
             let m = &self.bias_gradient[i];
-            fmt_str.push_str(&format!("Gradiant Bias dim: {:?}\n", m.get_dim()));
+            fmt_str.push_str(&format!("Gradiant Bias: {:?}\n", m));
             let m = &self.avg_weight[i];
-            fmt_str.push_str(&format!("Avg Weight dim: {:?}\n", m.get_dim()));
+            fmt_str.push_str(&format!("Avg Weight: {:?}\n", m));
             let m = &self.weight_gradient[i];
-            fmt_str.push_str(&format!("Gradiant Weight dim: {:?}\n", m.get_dim()));
+            fmt_str.push_str(&format!("Gradiant Weight: {:?}\n", m));
         }
         write!(f, "Stats:\n{}", fmt_str)
     }
@@ -112,6 +123,7 @@ impl NN {
         self.weights[0] = Matrix::new(0, 0);
         self.transposed_weights[0] = Matrix::new(0, 0);
         self.bias[0] = Matrix::new(0, 0);
+        self.errors[0] = Matrix::new(0, 0);
 
         for i in 1..self.layer_count {
             let prev_len = self.layer_lengths[i - 1];
@@ -137,11 +149,78 @@ impl NN {
         }
     }
 
-    pub fn learn(&mut self) {
-        // Feedforward
-        for i in 1..self.layer_count {
-            self.calculate_layer(i);
+    pub fn initialize_data(&mut self, data: &DataSet) {
+        self.data = data.clone();
+    }
+
+    pub fn train(&mut self) {
+        let index = self.data.get_random_index();
+        let input = self.data.get_input(index).as_vec();
+        let output = self.data.get_output(index);
+        // println!("{:?} {:?}", input, output);
+        self.internal_train(&input, &output.as_vec());
+    }
+
+    fn internal_train(&mut self, input: &Vec<f32>, output: &Vec<f32>) {
+        self.set_target(output);
+        self.set_input(input);
+        self.learn();
+    }
+
+    pub fn adapt_weights(&mut self) {
+        // println!("{:?}", self);
+        for i in (0..=self.last_layer).rev() {
+            self.avg_bias[i].multiply_scalar(LEARN_FACTOR);
+            self.bias[i] = self.bias[i].sub(&self.avg_bias[i]).unwrap();
+
+            self.weights[i].multiply_scalar(LEARN_REG_BATCH_FACTOR);
+            self.avg_weight[i].multiply_scalar(LEARN_FACTOR);
+            self.weights[i] = self.weights[i].sub(&self.avg_weight[i]).unwrap();
         }
+        for i in 0..self.layer_count {
+            self.avg_bias[i].fill(0.0);
+            self.avg_weight[i].fill(0.0);
+        }
+    }
+
+    pub fn is_finished(&mut self) -> bool {
+        self.get_average_accuracy() >= TARGET_ACCURACY
+    }
+
+    fn get_average_accuracy(&mut self) -> f32 {
+        self.floating_average *= FLOATING_WEIGHT;
+        self.floating_average += (1.0 - FLOATING_WEIGHT) * self.generate_validation();
+        println!("{}", self.floating_average);
+        self.floating_average
+    }
+
+    fn generate_validation(&mut self) -> f32 {
+        let mut correct = 0;
+        let mut total = 0;
+        for _ in 0..VALIDATION_SIZE {
+            let index = self.data.get_random_index();
+            let input = self.data.get_input(index).as_vec();
+            let output = self.data.get_output(index);
+            let g = self.guess(&input);
+            if g == output.get_solution() as usize {
+                correct += 1;
+            }
+            total += 1;
+        }
+        (correct as f32) / (total as f32)
+    }
+
+    fn set_target(&mut self, target: &Vec<f32>) {
+        self.target_vector.fill_vec(target);
+    }
+
+    fn set_input(&mut self, input: &Vec<f32>) {
+        self.layers[0].fill_vec(input);
+    }
+
+    fn learn(&mut self) {
+        // Feedforward
+        self.calculate_layers();
 
         self.calculate_cost();
 
@@ -162,7 +241,7 @@ impl NN {
             self.weight_gradient[i] = self.errors[i].dyadic_product(&self.transposed_layers[i - 1]).unwrap();
         }
 
-        for i in 1..self.layer_count {
+        for i in 0..self.layer_count {
             // Skipping layer 0 because there's no gradients there
             self.bias_gradient[i] = self.errors[i].clone();
         }
@@ -173,8 +252,54 @@ impl NN {
         }
     }
 
+    pub fn print_guess(&mut self) {
+        for _ in 0..50 {
+            let index = self.data.get_random_index();
+            let input = self.data.get_input(index).as_vec();
+            let output = self.data.get_output(index);
+            let g = self.guess(&input);
+            println!("{:?} {:?} {} {}", input, output, output.get_solution(), g);
+        }
+    }
+
+    fn guess(&mut self, input: &Vec<f32>) -> usize {
+        self.set_input(input);
+
+        self.calculate_layers();
+
+        let size = self.layers[self.last_layer].len();
+        if size == 1 {
+            self.layers[self.last_layer].get_unchecked(0, 0).round() as usize
+        } else {
+            let mut sum = 0.0;
+            for i in 0..size {
+                sum += self.layers[self.last_layer].get_at_index(i).exp();
+            }
+            for i in 0..size {
+                let new_val = self.layers[self.last_layer].get_at_index(i).exp();
+                self.layers[self.last_layer].set_at_index(i, new_val / sum);
+            }
+            let mut index = usize::MAX;
+            let mut highest_prob = 0.0;
+            for i in 0..size {
+                let g = self.layers[self.last_layer].get_at_index(i);
+                if g > highest_prob {
+                    highest_prob = g;
+                    index = i;
+                }
+            }
+            index
+        }
+    }
+
     fn calculate_cost(&mut self) {
         self.current_cost = self.layers[self.last_layer].sub(&self.target_vector).unwrap();
+    }
+
+    fn calculate_layers(&mut self) {
+        for i in 1..self.layer_count {
+            self.calculate_layer(i);
+        }
     }
 
     fn calculate_layer(&mut self, layer: usize) {

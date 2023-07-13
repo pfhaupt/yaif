@@ -25,6 +25,11 @@ impl Matrix {
     }
 
     #[inline]
+    pub fn len(&self) -> usize {
+        self.size
+    }
+
+    #[inline]
     pub fn get_index(&self, x: usize, y: usize) -> usize {
         x * self.cols + y
     }
@@ -44,6 +49,11 @@ impl Matrix {
     }
 
     #[inline]
+    pub fn get_at_index(&self, index: usize) -> f32 {
+        self.content[index]
+    }
+
+    #[inline]
     pub fn set(&mut self, x: usize, y: usize, val: f32) -> Result<(), &str> {
         if x >= self.rows || y >= self.cols {
             Err("Out of bounds!")
@@ -60,11 +70,25 @@ impl Matrix {
         self.content[i] = val;
     }
 
+    #[inline]
+    pub fn set_at_index(&mut self, index: usize, val: f32) {
+        self.content[index] = val;
+    }
+
     pub fn fill(&mut self, val: f32) {
         for x in 0..self.rows {
             for y in 0..self.cols {
                 self.set_unchecked(x, y, val);
             }
+        }
+    }
+
+    pub fn fill_vec(&mut self, values: &Vec<f32>) {
+        if values.len() != self.len() {
+            panic!("Mismatched dimensions in fill_vec!");
+        }
+        for i in 0..self.size {
+            self.content[i] = values[i];
         }
     }
 
