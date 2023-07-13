@@ -1,9 +1,9 @@
 
 #[derive(PartialEq, Debug)]
 pub struct Matrix {
-    pub rows: usize,
-    pub cols: usize,
-    pub content: Vec<f32>
+    rows: usize,
+    cols: usize,
+    content: Vec<f32>
 }
 
 impl Matrix {
@@ -79,12 +79,13 @@ impl Matrix {
 
 #[cfg(test)]
 mod tests {
+    const TEST_CASES: usize = 100;
     use super::*;
     use rand::Rng;
 
     #[test]
     fn init_matrix() {
-        for _ in 0..100 {
+        for _ in 0..TEST_CASES {
             let r = rand::thread_rng().gen_range(0..100);
             let c = rand::thread_rng().gen_range(0..100);
             let result = Matrix::new(r, c);
@@ -94,17 +95,21 @@ mod tests {
 
     #[test]
     fn add_not_same_dim() {
-        let m1 = Matrix::new(5, 5);
-        let m2 = Matrix::new(6, 6);
-        let r1 = m1.add(&m2);
-        let r2 = m2.add(&m1);
-        assert!(r1.is_err());
-        assert!(r2.is_err());
+        for _ in 0..TEST_CASES {
+            let rows: usize = rand::thread_rng().gen_range(5..100);
+            let cols: usize = rand::thread_rng().gen_range(5..100);
+            let m1 = Matrix::new(rows, cols);
+            let m2 = Matrix::new(cols + 1, rows + 1);
+            let r1 = m1.add(&m2);
+            let r2 = m2.add(&m1);
+            assert!(r1.is_err());
+            assert!(r2.is_err());
+        }
     }
 
     #[test]
     fn add_same_dim() {
-        for _ in 0..100 {
+        for _ in 0..TEST_CASES {
             let rows: usize = rand::thread_rng().gen_range(5..100);
             let cols: usize = rand::thread_rng().gen_range(5..100);
             let mut m1 = Matrix::new(rows, cols);
@@ -126,17 +131,21 @@ mod tests {
 
     #[test]
     fn sub_not_same_dim() {
-        let m1 = Matrix::new(5, 5);
-        let m2 = Matrix::new(6, 6);
-        let r1 = m1.sub(&m2);
-        let r2 = m2.sub(&m1);
-        assert!(r1.is_err());
-        assert!(r2.is_err());
+        for _ in 0..TEST_CASES {
+            let rows: usize = rand::thread_rng().gen_range(5..100);
+            let cols: usize = rand::thread_rng().gen_range(5..100);
+            let m1 = Matrix::new(rows, cols);
+            let m2 = Matrix::new(cols + 1, rows + 1);
+            let r1 = m1.sub(&m2);
+            let r2 = m2.sub(&m1);
+            assert!(r1.is_err());
+            assert!(r2.is_err());
+        }
     }
 
     #[test]
     fn sub_same_dim() {
-        for _ in 0..100 {
+        for _ in 0..TEST_CASES {
             let rows: usize = rand::thread_rng().gen_range(5..100);
             let cols: usize = rand::thread_rng().gen_range(5..100);
             let mut m1 = Matrix::new(rows, cols);
