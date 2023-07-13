@@ -1,6 +1,7 @@
 use super::matrix::Matrix;
+use std::fmt::{ Debug, Formatter };
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct NN {
     // General stuff
     layer_lengths: Vec<usize>,
@@ -26,6 +27,38 @@ pub struct NN {
     target_vector: Matrix,
     current_cost: Matrix,
     floating_average: f32
+}
+
+impl Debug for NN {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        let mut fmt_str = String::new();
+        fmt_str.push_str(&format!("Layer Count: {}\n", self.layer_count));
+        fmt_str.push_str(&format!("Layer lengths: {:?}\n", self.layer_lengths));
+        for i in 0..self.layer_count {
+            fmt_str.push_str(&format!("\nLayer {}:\n", i));
+            let m = &self.layers[i];
+            fmt_str.push_str(&format!("Layer dim: {:?}\n", m.get_dim()));
+            let m = &self.transposed_layers[i];
+            fmt_str.push_str(&format!("Transposed Layer dim: {:?}\n", m.get_dim()));
+            let m = &self.errors[i];
+            fmt_str.push_str(&format!("Errors dim: {:?}\n", m.get_dim()));
+            let m = &self.weights[i];
+            fmt_str.push_str(&format!("Weights dim: {:?}\n", m.get_dim()));
+            let m = &self.transposed_weights[i];
+            fmt_str.push_str(&format!("Transposed Weights dim: {:?}\n", m.get_dim()));
+            let m = &self.bias[i];
+            fmt_str.push_str(&format!("Bias dim: {:?}\n", m.get_dim()));
+            let m = &self.avg_bias[i];
+            fmt_str.push_str(&format!("Avg Bias dim: {:?}\n", m.get_dim()));
+            let m = &self.bias_gradient[i];
+            fmt_str.push_str(&format!("Gradiant Bias dim: {:?}\n", m.get_dim()));
+            let m = &self.avg_weight[i];
+            fmt_str.push_str(&format!("Avg Weight dim: {:?}\n", m.get_dim()));
+            let m = &self.weight_gradient[i];
+            fmt_str.push_str(&format!("Gradiant Weight dim: {:?}\n", m.get_dim()));
+        }
+        write!(f, "Stats:\n{}", fmt_str)
+    }
 }
 
 impl NN {
