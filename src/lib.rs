@@ -27,7 +27,7 @@ impl Matrix {
     }
 
     #[inline]
-    pub fn get_unchecked(&mut self, x: usize, y: usize) -> f32 {
+    pub fn get_unchecked(&self, x: usize, y: usize) -> f32 {
         self.content[self.get_index(x, y)]
     }
 
@@ -55,7 +55,7 @@ impl Matrix {
             let mut m = Matrix::new(self.rows, self.cols);
             for i in 0..self.rows {
                 for j in 0..self.cols {
-                    m.set(i, j, self.get(i, j).unwrap() + other.get(i, j).unwrap()).unwrap();
+                    m.set_unchecked(i, j, self.get_unchecked(i, j) + other.get_unchecked(i, j));
                 }
             }
             Ok(m)
