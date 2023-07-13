@@ -1,4 +1,5 @@
 use rand_distr::{Normal, Distribution};
+
 #[derive(PartialEq, Debug, Clone, Default)]
 pub struct Matrix {
     rows: usize,

@@ -31,7 +31,7 @@ pub struct NN {
 impl NN {
     pub fn new(layer_sizes: Vec<usize>) -> Result<Self, &'static str> {
         if layer_sizes.len() == 1 {
-            Err("Network has only one layer.")
+            Err("Network only has one layer.")
         } else if layer_sizes.len() < 1 {
             Err("Network has no layers.")
         } else {
@@ -107,9 +107,38 @@ impl NN {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     const TEST_CASES: usize = 1_000;
     #[test]
     fn init_nn() {
-        assert!(true);
+        for _ in 0..TEST_CASES {
+            let big_net = NN::new(vec![10, 15, 20, 25, 30]);
+            assert!(big_net.is_ok());
+
+            let big_net = big_net.unwrap();
+
+            assert_eq!(big_net.weights[0].get_dim(), (0, 0));
+            assert_eq!(big_net.weights[1].get_dim(), (15, 10));
+            assert_eq!(big_net.weights[2].get_dim(), (20, 15));
+            assert_eq!(big_net.weights[3].get_dim(), (25, 20));
+            assert_eq!(big_net.weights[4].get_dim(), (30, 25));
+
+            assert_eq!(big_net.bias[0].get_dim(), (0, 0));
+            assert_eq!(big_net.bias[1].get_dim(), (15, 1));
+            assert_eq!(big_net.bias[2].get_dim(), (20, 1));
+            assert_eq!(big_net.bias[3].get_dim(), (25, 1));
+            assert_eq!(big_net.bias[4].get_dim(), (30, 1));
+
+            assert_eq!(big_net.target_vector.get_dim(), (30, 1));
+
+            let n = NN::new(vec![10, 3]);
+            assert!(n.is_ok());
+
+            let one_layer = NN::new(vec![0]);
+            assert_eq!(one_layer.err().unwrap(), "Network only has one layer.");
+            
+            let no_layer = NN::new(vec![]);
+            assert_eq!(no_layer.err().unwrap(), "Network has no layers.");
+        }
     }
 }
