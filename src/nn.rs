@@ -82,7 +82,7 @@ impl NN {
             let mut result: NN = Default::default();
             result.initialize_layers(layer_sizes);
             result.initialize_network();
-            println!("Initialized a Neural Network!\n{:?}", result);
+            // println!("Initialized a Neural Network!\n{:?}", result);
             Ok(result)
         }
     }
@@ -173,7 +173,7 @@ impl NN {
             self.avg_bias[i].multiply_scalar(LEARN_FACTOR);
             self.bias[i] = self.bias[i].sub(&self.avg_bias[i]).unwrap();
 
-            self.weights[i].multiply_scalar(LEARN_REG_BATCH_FACTOR);
+            // self.weights[i].multiply_scalar(LEARN_REG_BATCH_FACTOR);
             self.avg_weight[i].multiply_scalar(LEARN_FACTOR);
             self.weights[i] = self.weights[i].sub(&self.avg_weight[i]).unwrap();
         }
@@ -236,13 +236,12 @@ impl NN {
         }
 
         // Gradiant Weights
-        for i in 1..self.weights.len() {
+        for i in 1..self.layer_count {
             self.transposed_layers[i - 1] = self.layers[i - 1].transpose();
             self.weight_gradient[i] = self.errors[i].dyadic_product(&self.transposed_layers[i - 1]).unwrap();
         }
 
         for i in 0..self.layer_count {
-            // Skipping layer 0 because there's no gradients there
             self.bias_gradient[i] = self.errors[i].clone();
         }
 
@@ -312,9 +311,9 @@ impl NN {
         let (r, c) = self.pre_activation[layer].get_dim();
         for x in 0..r {
             for y in 0..c {
-                let v = self.pre_activation[layer].get(x, y).unwrap();
+                let v = self.pre_activation[layer].get_unchecked(x, y);
                 let v = self.sigmoid(v);
-                self.layers[layer].set(x, y, v).unwrap();
+                self.layers[layer].set_unchecked(x, y, v);
             }
         }
     }
@@ -377,5 +376,36 @@ mod tests {
             let no_layer = NN::new(vec![]);
             assert_eq!(no_layer.err().unwrap(), "Network has no layers.");
         }
+    }
+
+    #[test]
+    fn xor_test() {
+        let mut success_ctr = 0;
+        const ATTEMPTS: usize = 10;
+        const TARGET: usize = 5;
+        for _ in 0..ATTEMPTS {
+            let mut nn = NN::new(vec![2, 2, 1]).unwrap();
+            let inputs: Vec<Vec<f32>> = vec![vec![0.0, 0.0], vec![0.0, 1.0], vec![1.0, 0.0], vec![1.0, 1.0]];
+            let outputs: Vec<Vec<f32>> = vec![vec![0.0], vec![1.0], vec![1.0], vec![0.0]];
+            let data = DataSet::new(&inputs, &outputs);
+            nn.initialize_data(&data);
+            const BATCH_SIZE: usize = 50;
+            const TRAINING_DATA: usize = 10_000;
+            const EPOCH_SIZE: usize = TRAINING_DATA / BATCH_SIZE;
+            const EPOCH_COUNT: usize = 100;
+            'epoch_loop: for _ in 0..EPOCH_COUNT {
+                for _ in 0..EPOCH_SIZE {
+                    for _ in 0..BATCH_SIZE {
+                        nn.train();
+                    }
+                    nn.adapt_weights();
+                }
+                if nn.is_finished() {
+                    success_ctr += 1;
+                    break 'epoch_loop;
+                }
+            }
+        }
+        assert!(success_ctr >= TARGET, "Network must pass {} out of {} tests, got {}", TARGET, ATTEMPTS, success_ctr);
     }
 }
