@@ -2,15 +2,15 @@ use super::matrix::Matrix;
 use super::data_set::DataSet;
 use std::fmt::{ Debug, Formatter };
 
-const LEARN_FACTOR: f32 = 0.005;
+const LEARN_FACTOR: f32 = 0.05;
 const REGULATION_FACTOR: f32 = 1e-11;
 const LEARN_REG_BATCH_FACTOR: f32 = 1.0;
 const TARGET_ACCURACY: f32 = 0.95;
 const FLOATING_WEIGHT: f32 = 0.0;
-const VALIDATION_SIZE: usize = 2_500;
+const VALIDATION_SIZE: usize = 100;
 
 const BATCH_SIZE: usize = 50;
-const TRAINING_DATA: usize = 10_000;
+const TRAINING_DATA: usize = 1_000;
 const EPOCH_SIZE: usize = TRAINING_DATA / BATCH_SIZE;
 const EPOCH_COUNT: usize = 100;
 
@@ -42,7 +42,8 @@ pub struct NN {
     floating_average: f32,
 
     // Training Data
-    data: DataSet
+    training_data: DataSet,
+    validation_data: DataSet,
 }
 
 impl Debug for NN {
@@ -154,14 +155,19 @@ impl NN {
         }
     }
 
-    pub fn initialize_data(&mut self, data: &DataSet) {
-        self.data = data.clone();
+    pub fn initialize_training_data(&mut self, data: &DataSet) {
+        self.training_data = data.clone();
+        self.initialize_validation_data(data);
+    }
+
+    pub fn initialize_validation_data(&mut self, data: &DataSet) {
+        self.validation_data = data.clone();
     }
 
     pub fn train(&mut self) {
-        let index = self.data.get_random_index();
-        let input = self.data.get_input(index).as_vec();
-        let output = self.data.get_output(index);
+        let index = self.training_data.get_random_index();
+        let input = self.training_data.get_input(index).as_vec();
+        let output = self.training_data.get_output(index);
         // println!("{:?} {:?}", input, output);
         self.internal_train(&input, &output.as_vec());
     }
@@ -195,7 +201,6 @@ impl NN {
     fn get_average_accuracy(&mut self) -> f32 {
         self.floating_average *= FLOATING_WEIGHT;
         self.floating_average += (1.0 - FLOATING_WEIGHT) * self.generate_validation();
-        println!("{}", self.floating_average);
         self.floating_average
     }
 
@@ -203,9 +208,9 @@ impl NN {
         let mut correct = 0;
         let mut total = 0;
         for _ in 0..VALIDATION_SIZE {
-            let index = self.data.get_random_index();
-            let input = self.data.get_input(index).as_vec();
-            let output = self.data.get_output(index);
+            let index = self.validation_data.get_random_index();
+            let input = self.validation_data.get_input(index).as_vec();
+            let output = self.validation_data.get_output(index);
             let g = self.guess(&input);
             if g == output.get_solution() as usize {
                 correct += 1;
@@ -215,13 +220,16 @@ impl NN {
         (correct as f32) / (total as f32)
     }
 
-    pub fn run(&mut self) -> bool {
+    pub fn run(&mut self, debug: bool) -> bool {
         for _ in 0..EPOCH_COUNT {
             for _ in 0..EPOCH_SIZE {
                 for _ in 0..BATCH_SIZE {
                     self.train();
                 }
                 self.adapt_weights();
+            }
+            if debug {
+                self.print_guess();
             }
             if self.is_finished() {
                 return true;
@@ -272,12 +280,12 @@ impl NN {
     }
 
     pub fn print_guess(&mut self) {
-        for _ in 0..50 {
-            let index = self.data.get_random_index();
-            let input = self.data.get_input(index).as_vec();
-            let output = self.data.get_output(index);
+        for _ in 0..10 {
+            let index = self.validation_data.get_random_index();
+            let input = self.validation_data.get_input(index).as_vec();
+            let output = self.validation_data.get_output(index);
             let g = self.guess(&input);
-            println!("{:?} {:?} {} {}", input, output, output.get_solution(), g);
+            println!("Guess: {}, Solution: {}", g, output.get_solution());
         }
     }
 
@@ -288,7 +296,7 @@ impl NN {
 
         let size = self.layers[self.last_layer].len();
         if size == 1 {
-            self.layers[self.last_layer].get_unchecked(0, 0).round() as usize
+            self.layers[self.last_layer].get_at_index(0).round() as usize
         } else {
             let mut sum = 0.0;
             for i in 0..size {
@@ -364,7 +372,10 @@ impl NN {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
     const TEST_CASES: usize = 1_000;
+    const ATTEMPTS: usize = 6;
+    const TARGET: usize =  ATTEMPTS / 2;
     #[test]
     fn init_nn() {
         for _ in 0..TEST_CASES {
@@ -401,17 +412,156 @@ mod tests {
     #[test]
     fn xor_test() {
         let mut success_ctr = 0;
-        const ATTEMPTS: usize = 10;
-        const TARGET: usize = 5;
         for _ in 0..ATTEMPTS {
-            let mut nn = NN::new(vec![2, 2, 1]).unwrap();
+            let mut nn = NN::new(vec![2, 2, 2]).unwrap();
             let inputs: Vec<Vec<f32>> = vec![vec![0.0, 0.0], vec![0.0, 1.0], vec![1.0, 0.0], vec![1.0, 1.0]];
-            let outputs: Vec<Vec<f32>> = vec![vec![0.0], vec![1.0], vec![1.0], vec![0.0]];
+            let outputs: Vec<Vec<f32>> = vec![vec![1.0, 0.0], vec![0.0, 1.0], vec![0.0, 1.0], vec![1.0, 0.0]];
             let data = DataSet::new(&inputs, &outputs);
-            nn.initialize_data(&data);
-            let finished = nn.run();
+            nn.initialize_training_data(&data);
+            let finished = nn.run(false);
             if finished {
                 success_ctr += 1;
+            }
+        }
+        assert!(success_ctr >= TARGET, "Network must pass {} out of {} tests, got {}", TARGET, ATTEMPTS, success_ctr);
+    }
+
+    #[test]
+    fn mnist_test() {        
+        fn parse_input(which: &str) -> Vec<Vec<f32>> {
+            let (count, file_size, file_path)= match which {
+                "training" => (60_000, 47_040_016, "mnist/train-images.idx3-ubyte"),
+                "validation"=> (10_000, 7_840_016, "mnist/t10k-images.idx3-ubyte"),
+                _ => panic!("Unknown argument `{}`", which)
+            };
+
+            match std::fs::File::open(file_path) {
+                Ok(mut file) => {
+                    let mut buffer = vec![];
+                    match file.read_to_end(&mut buffer) {
+                        Ok(size) => {
+                            assert_eq!(size, file_size, "Excepted MNIST image-size is {} bytes, but reading got {} bytes.", file_size, size);
+                            let next_bytes = |offset: usize| -> [u8; 4] {
+                                let mut bytes = [0; 4];
+                                for i in 0..4 {
+                                    bytes[i] = buffer[offset + i];
+                                }
+                                bytes
+                            };
+                            let bytes = next_bytes(0);
+                            let _magic_number = u32::from_be_bytes(bytes) as usize;
+                            assert!(bytes[0] == 0);
+                            assert!(bytes[1] == 0);
+                            assert!(bytes[2] == 8); // each Byte is a value
+                            assert!(bytes[3] == 3); // a Vector of matrices (or a '3D Matrix')
+
+                            let bytes = next_bytes(4);
+                            let first_dim = u32::from_be_bytes(bytes) as usize;
+                            assert_eq!(first_dim, count);
+                            
+                            let bytes = next_bytes(8);
+                            let second_dim = u32::from_be_bytes(bytes) as usize;
+                            assert_eq!(second_dim, 28);
+
+                            let bytes = next_bytes(12);
+                            let third_dim = u32::from_be_bytes(bytes) as usize;
+                            assert_eq!(third_dim, 28);
+
+                            let next_byte = |index: &mut usize| -> u8 { let v = buffer[*index]; *index += 1; v };
+                            let mut input = vec![vec![0.0; second_dim * third_dim]; first_dim];
+                            let mut index = 16;
+                            for f in 0..first_dim {
+                                for i in 0..(second_dim * third_dim) {
+                                    input[f][i] = next_byte(&mut index) as f32 / 256.0;
+                                }
+                            }
+                            input
+                        },
+                        Err(e) => {
+                            panic!("{}", e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    panic!("{}", e);
+                }
+            }
+        }
+
+        fn parse_output(which: &str) -> Vec<Vec<f32>> {
+            let (count, file_size, file_path)= match which {
+                "training" => (60_000, 60_008, "mnist/train-labels.idx1-ubyte"),
+                "validation"=> (10_000, 10_008, "mnist/t10k-labels.idx1-ubyte"),
+                _ => panic!("Unknown argument `{}`", which)
+            };
+            match std::fs::File::open(file_path) {
+                Ok(mut file) => {
+                    let mut buffer = vec![];
+                    match file.read_to_end(&mut buffer) {
+                        Ok(size) => {
+                            assert_eq!(size, file_size, "Excepted MNIST label-size is {} bytes, but reading got {} bytes.", file_size, size);
+                            
+                            let next_bytes = |offset: usize| -> [u8; 4] {
+                                let mut bytes = [0; 4];
+                                for i in 0..4 {
+                                    bytes[i] = buffer[offset + i];
+                                }
+                                bytes
+                            };
+                            let bytes = next_bytes(0);
+                            let _magic_number = u32::from_be_bytes(bytes) as usize;
+                            assert!(bytes[0] == 0);
+                            assert!(bytes[1] == 0);
+                            assert!(bytes[2] == 8); // each Byte is a value
+                            assert!(bytes[3] == 1); // A single vector (or a '1D Matrix')
+
+                            let bytes = next_bytes(4);
+                            let dimension = u32::from_be_bytes(bytes) as usize;
+                            assert_eq!(dimension, count);
+
+                            let next_byte = |index: &mut usize| -> u8 { let v = buffer[*index]; *index += 1; v };
+                            let mut output = vec![vec![0.0; 10]; dimension];
+                            let mut index = 8;
+                            for f in 0..dimension {
+                                let v = next_byte(&mut index) as usize;
+                                output[f][v] = 1.0;
+                            }
+                            output
+                        },
+                        Err(e) => {
+                            panic!("{}", e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    panic!("{}", e);
+                }
+            }
+        }
+
+        let layers = vec![28 * 28, 50, 50, 10];
+
+        let inputs: Vec<Vec<f32>> = parse_input("training");
+        let outputs: Vec<Vec<f32>> = parse_output("training");
+        let train_set = DataSet::new(&inputs, &outputs);
+    
+        let inputs: Vec<Vec<f32>> = parse_input("validation");
+        let outputs: Vec<Vec<f32>> = parse_output("validation");
+        let validation_set = DataSet::new(&inputs, &outputs);
+        
+        let mut success_ctr = 0;
+        for _ in 0..ATTEMPTS {
+            match NN::new(layers.clone()) {
+                Ok(mut nn) => {
+                    nn.initialize_training_data(&train_set);
+                    nn.initialize_validation_data(&validation_set);
+                    if nn.run(false) {
+                        success_ctr += 1;
+                    }
+                },
+                Err(e) => {
+                    panic!("Could not init Network! {}", e);
+                }
             }
         }
         assert!(success_ctr >= TARGET, "Network must pass {} out of {} tests, got {}", TARGET, ATTEMPTS, success_ctr);
