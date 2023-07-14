@@ -9,6 +9,11 @@ const TARGET_ACCURACY: f32 = 0.95;
 const FLOATING_WEIGHT: f32 = 0.0;
 const VALIDATION_SIZE: usize = 2_500;
 
+const BATCH_SIZE: usize = 50;
+const TRAINING_DATA: usize = 10_000;
+const EPOCH_SIZE: usize = TRAINING_DATA / BATCH_SIZE;
+const EPOCH_COUNT: usize = 100;
+
 #[derive(Default)]
 pub struct NN {
     // General stuff
@@ -210,6 +215,21 @@ impl NN {
         (correct as f32) / (total as f32)
     }
 
+    pub fn run(&mut self) -> bool {
+        for _ in 0..EPOCH_COUNT {
+            for _ in 0..EPOCH_SIZE {
+                for _ in 0..BATCH_SIZE {
+                    self.train();
+                }
+                self.adapt_weights();
+            }
+            if self.is_finished() {
+                return true;
+            }
+        }
+        false
+    }
+
     fn set_target(&mut self, target: &Vec<f32>) {
         self.target_vector.fill_vec(target);
     }
@@ -389,21 +409,9 @@ mod tests {
             let outputs: Vec<Vec<f32>> = vec![vec![0.0], vec![1.0], vec![1.0], vec![0.0]];
             let data = DataSet::new(&inputs, &outputs);
             nn.initialize_data(&data);
-            const BATCH_SIZE: usize = 50;
-            const TRAINING_DATA: usize = 10_000;
-            const EPOCH_SIZE: usize = TRAINING_DATA / BATCH_SIZE;
-            const EPOCH_COUNT: usize = 100;
-            'epoch_loop: for _ in 0..EPOCH_COUNT {
-                for _ in 0..EPOCH_SIZE {
-                    for _ in 0..BATCH_SIZE {
-                        nn.train();
-                    }
-                    nn.adapt_weights();
-                }
-                if nn.is_finished() {
-                    success_ctr += 1;
-                    break 'epoch_loop;
-                }
+            let finished = nn.run();
+            if finished {
+                success_ctr += 1;
             }
         }
         assert!(success_ctr >= TARGET, "Network must pass {} out of {} tests, got {}", TARGET, ATTEMPTS, success_ctr);
