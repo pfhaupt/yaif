@@ -53,7 +53,7 @@ impl Output {
 
     #[inline]
     pub fn get_solution(&self) -> f32 {
-        self.values[self.solution_id]
+        self.solution_id as f32
     }
 
     pub fn as_vec(&self) -> Vec<f32> {
