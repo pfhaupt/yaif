@@ -90,10 +90,18 @@ impl Matrix {
 
     pub fn fill_vec(&mut self, values: &Vec<f32>) {
         if values.len() != self.len() {
-            panic!("Mismatched dimensions in fill_vec!");
+            panic!("Mismatched dimensions in fill_vec! {} {:?}", values.len(), self.get_dim());
         }
         for i in 0..self.size {
             self.content[i] = values[i];
+        }
+    }
+
+    pub fn fill_fit(&mut self, values: &Vec<f32>, dim: usize) {
+        for y in 0..self.cols {
+            for x in 0..self.rows {
+                self.set_unchecked(x, y, values[y * dim + x]);
+            }
         }
     }
 
@@ -104,6 +112,23 @@ impl Matrix {
                 self.set_unchecked(x, y, normal.sample(&mut rand::thread_rng()));
             }
         }
+    }
+
+    pub fn pad(&mut self, pad_rows: usize, pad_cols: usize) {
+        let old_content = self.content.clone();
+        let old_rows = self.rows;
+        let old_cols = self.cols;
+
+        self.rows += pad_rows;
+        self.cols += pad_cols;
+        self.size = self.rows * self.cols;
+        let mut new_content = vec![0.0; self.size];
+        for x in 0..old_rows {
+            for y in 0..old_cols {
+                new_content[x * self.cols + y] = old_content[x * old_cols + y];
+            }
+        }
+        self.content = new_content.clone();
     }
 
     pub fn add(&self, other: &Matrix) -> Result<Self, &str> {
@@ -136,23 +161,21 @@ impl Matrix {
 
     pub fn multiply(&self, other: &Matrix) -> Result<Self, &str> {
         if self.cols != other.rows {
-            Err("Mismatch in dimensions!")
-        } else {
-            let mut result = Matrix::new(self.rows, other.cols);
-            let m = self.rows;
-            let n = self.cols;
-            let p = other.cols;
-            for i in 0..m {
-                for j in 0..p {
-                    let mut s = 0.0;
-                    for k in 0..n {
-                        s += self.get_unchecked(i, k) * other.get_unchecked(k, j);
-                    }
-                    result.set_unchecked(i, j, s);
-                }
-            }
-            Ok(result)
+            return Err("mismatch in dimensions!"); // Invalid matrix dimensions for multiplication
         }
+        let mut result = Matrix::new(self.rows, other.cols);
+
+        for i in 0..self.rows {
+            for j in 0..other.cols {
+                let mut sum = 0.0;
+                for k in 0..self.cols {
+                    sum += self.get_unchecked(i, k) * other.get_unchecked(k, j);
+                }
+                result.set_unchecked(i, j, sum);
+            }
+        }
+
+        Ok(result)
     }
 
     pub fn multiply_scalar(&mut self, scalar: f32) {
