@@ -54,6 +54,11 @@ impl Matrix {
     }
 
     #[inline]
+    pub fn get_all(&self) -> Vec<f32> {
+        self.content.clone()
+    }
+
+    #[inline]
     pub fn set(&mut self, x: usize, y: usize, val: f32) -> Result<(), &str> {
         if x >= self.rows || y >= self.cols {
             Err("Out of bounds!")
