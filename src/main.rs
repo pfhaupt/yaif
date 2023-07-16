@@ -14,15 +14,15 @@ use std::ptr;
 fn init_mat(size: usize) -> (Matrix, Matrix) {
     let mut m1 = Matrix::new(size, size);
     let mut m2 = Matrix::new(size, size);
-    m1.gaussian_fill(0.0, 1.0);
-    m2.gaussian_fill(0.0, 1.0);
+    m1.fill(1.0);
+    m2.fill(1.0);
     (m1, m2)
 }
 
 fn test_solo(tests: usize, size: usize) {
     for _ in 0..tests {
         let (m1, m2) = init_mat(size);
-        let _r1 = m1.add(&m2).unwrap();
+        let r = m1.add(&m2).unwrap();
     }
 }
 
@@ -35,8 +35,8 @@ kernel void matrix_add(global float* z,
     const size_t global_idx_x = get_global_id(0);
     const size_t global_idx_y = get_global_id(1);
     
-    const array_idx = global_idx_x + global_idx_y * local_dispatch_size;
-    z[array_idx] = x[array_idx] + y[array_idx];
+    const i = global_idx_x + global_idx_y * local_dispatch_size;
+    z[i] = x[i] + y[i];
 }"#;
 
 const KERNEL_NAME: &str = "matrix_add";
@@ -53,13 +53,14 @@ fn test_opencl(kernel: &Kernel, context: &Context, queue: &CommandQueue, tests: 
         let _x_write_event = queue.enqueue_write_buffer(&mut x, CL_BLOCKING, 0, &m1.get_all(), &[])?;
         let y_write_event = queue.enqueue_write_buffer(&mut y, CL_NON_BLOCKING, 0, &m2.get_all(), &[])?;
         
+        let gs = (array_size / 512 + 1) * 512;
         let kernel_event = 
             ExecuteKernel::new(&kernel)
                 .set_arg(&z)
                 .set_arg(&x)
                 .set_arg(&y)
-                .set_global_work_sizes(&[(array_size/64) + 1, 1, 1])
-                .set_local_work_sizes(&[16, 1, 1])
+                .set_global_work_sizes(&[gs, 1, 1])
+                .set_local_work_sizes(&[512, 1, 1])
                 .set_wait_event(&y_write_event)
                 .enqueue_nd_range(&queue)?;
         
@@ -87,11 +88,10 @@ fn time_init(tests: usize, size: usize) {
 }
 
 fn main() -> Result<()> {
-    let size = 1_000;
-
+    const TESTS: usize = 100;
     let device_id = *get_all_devices(CL_DEVICE_TYPE_GPU)?
-        .first()
-        .expect("no device found in platform");
+    .first()
+    .expect("no device found in platform");
     let device = Device::new(device_id);
     let context = Context::from_device(&device).expect("Context::from_device failed");
     let queue = CommandQueue::create_with_properties(&context, device_id, CL_QUEUE_PROFILING_ENABLE, 0)
@@ -100,19 +100,25 @@ fn main() -> Result<()> {
         .expect("Program::create_and_build_from_source failed");
     let kernel = Kernel::create(&program, KERNEL_NAME).expect("Kernel::create failed");
 
-    const TESTS: usize = 100;
-    let now = Instant::now();
-    time_init(TESTS, size);
-    let elapsed = now.elapsed();
-    println!("Init Matrix takes {:?}", elapsed);
-    println!("All benchmarks below account for the initialization time.");
-    let dur = match test_opencl(&kernel, &context, &queue, TESTS, size) {
-        Ok(d) => { d },
-        Err(e) => panic!("{}", e),
-    };
-    println!("OpenCL matrix add ({}x{}): {:16?}ns", size, size, dur);
-    let now = Instant::now();
-    test_solo(TESTS, size);
-    println!("Basic matrix add ({}x{}):  {:16?}ns", size, size, (now.elapsed() - elapsed).as_nanos());
+    let mut actual_size = 1.0;
+
+    while actual_size < (1 << 12) as f64 {
+        let size = actual_size as usize;
+        let now = Instant::now();
+        time_init(TESTS, size);
+        let elapsed = now.elapsed();
+        println!("Init Matrix ({:4}x{:4}) {:?}", size, size, elapsed);
+        let cl_dur = match test_opencl(&kernel, &context, &queue, TESTS, size) {
+            Ok(d) => { d },
+            Err(e) => panic!("{}", e),
+        };
+        println!(" -- OpenCL matrix add ({:4}x{:4}): {:16?}ns", size, size, cl_dur);
+        let now = Instant::now();
+        test_solo(TESTS, size);
+        let solo_dur = (now.elapsed() - elapsed).as_nanos();
+        println!(" -- Basic matrix add ({:4}x{:4}):  {:16?}ns", size, size, solo_dur);
+        println!("Speed Up: {:.2}", solo_dur as f64 / cl_dur as f64);
+        actual_size *= 1.5;
+    }
     Ok(())
 }
