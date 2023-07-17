@@ -7,9 +7,9 @@ use opencl3::memory::Buffer;
 use opencl3::Result;
 
 
-const MMUL_VERSION: usize = 3;
+const MMUL_VERSION: usize = 1;
 
-const TS: usize = 16;
+pub const TS: usize = 16;
 
 const WPT: usize = 4;
 const RTS: usize = TS / WPT;
@@ -28,12 +28,16 @@ const LPTB: usize = (TSK * TSN) / (RTSM * RTSN);
 pub const ADD_NAME: &str = "matrix_add";
 pub const ADD_SOURCE: &str = r#"
 kernel void matrix_add(
-    global float* z,
-    global float const* x,
-    global float const* y)
+    const int M,
+    const int N,
+    global float const* A,
+    global float const* B,
+    global float* C)
 {
-    size_t i = get_global_id(0);
-    z[i] = x[i] + y[i];
+    const int globalRow = get_global_id(0);
+    const int globalCol = get_global_id(1);
+    const int i = globalCol * M + globalRow;
+    C[i] = A[i] + B[i];
 }"#;
 
 
@@ -251,38 +255,39 @@ kernel void matrix_mul_matrix(
 
 
 
-pub fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: u32, n: u32, k: u32, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
+pub fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, k: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
     let mut exec_kernel = ExecuteKernel::new(&kernel);
-    let event = exec_kernel.set_arg(&m)
-        .set_arg(&n)
-        .set_arg(&k)
+    let event = exec_kernel
+        .set_arg(&(m as u32))
+        .set_arg(&(n as u32))
+        .set_arg(&(k as u32))
         .set_arg(a)
         .set_arg(b)
         .set_arg(c);
     let result = match MMUL_VERSION {
         1 => {
-            event.set_global_work_sizes(&[m as usize, n as usize, 1])
+            event.set_global_work_sizes(&[m, n, 1])
                 .set_local_work_sizes(&[TS, TS, 1])
                 .enqueue_nd_range(&queue)?
         },
         2 => {
             event.set_arg_local_buffer(TS * TS * 4)
                 .set_arg_local_buffer(TS * TS * 4)
-                .set_global_work_sizes(&[m as usize, n as usize, 1])
+                .set_global_work_sizes(&[m, n, 1])
                 .set_local_work_sizes(&[TS, TS, 1])
                 .enqueue_nd_range(&queue)?
         },
         3 => {
             event.set_arg_local_buffer(TS * TS * 4)
                 .set_arg_local_buffer(TS * TS * 4)
-                .set_global_work_sizes(&[m as usize, n as usize / WPT, 1])
+                .set_global_work_sizes(&[m, n / WPT, 1])
                 .set_local_work_sizes(&[TS, TS / WPT, 1])
                 .enqueue_nd_range(&queue)?
         },
         4 => {
             event.set_arg_local_buffer(TSK * TSM * 4)
                 .set_arg_local_buffer(TSN * (TSK + 2) * 4)
-                .set_global_work_sizes(&[m as usize / WPTM, n as usize/ WPTN, 1])
+                .set_global_work_sizes(&[m / WPTM, n / WPTN, 1])
                 .set_local_work_sizes(&[RTSM, RTSN, 1])
                 .enqueue_nd_range(&queue)?
         },
@@ -291,4 +296,16 @@ pub fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: u32, n: u
         }
     };
     Ok(result)
+}
+
+pub fn get_madd_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
+    ExecuteKernel::new(&kernel)
+        .set_arg(&(m as u32))
+        .set_arg(&(n as u32))
+        .set_arg(a)
+        .set_arg(b)
+        .set_arg(c)
+        .set_global_work_sizes(&[m, n, 1])
+        .set_local_work_sizes(&[TS, TS, 1])
+        .enqueue_nd_range(&queue)
 }

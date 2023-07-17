@@ -4,6 +4,7 @@
 
 use yaif::matrix::Matrix;
 use core::panic;
+use std::process::exit;
 use std::time::Instant;
 
 use opencl3::command_queue::{CommandQueue, CL_QUEUE_PROFILING_ENABLE};
@@ -52,46 +53,49 @@ fn time_basic(tests: usize, size: usize, which: &str) {
 }
 
 fn test_add(kernel: &Kernel, context: &Context, queue: &CommandQueue, tests: usize, size: usize) -> Result<u64> {
-    let array_size = size * size;
+    let worst_case = (if size % 32 != 0 { (size / 32 + 1) * 32 } else { size }).pow(2);
 
-    let mut gs = (array_size / 64) * 64;
-    if gs == 0 || !array_size.is_power_of_two() { 
-        gs += 64;
-    }
-
-    let mut x = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, gs, ptr::null_mut())?;
-    let mut y = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, gs, ptr::null_mut())?;
-    let z = Buffer::<cl_float>::create(&context, CL_MEM_WRITE_ONLY, gs, ptr::null_mut())?;
+    let mut a = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, worst_case, ptr::null_mut())?;
+    let mut b = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, worst_case, ptr::null_mut())?;
+    let c = Buffer::<cl_float>::create(&context, CL_MEM_WRITE_ONLY, worst_case, ptr::null_mut())?;
     
     let mut dur = 0;
 
     for _ in 0..tests {
-        let (m1, m2) = init_mat(size);
+        let m = rand::thread_rng().gen_range(10..size);
+        let n = rand::thread_rng().gen_range(10..size);
+
+        let mut m1 = Matrix::new(m, n);
+        m1.fill(2.0);
+        let mut m2 = Matrix::new(m, n);
+        m2.fill(3.0);
+
+        let check_m1 = m1.clone();
+        let check_m2 = m2.clone();
+
+        let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+        let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+
+        m1.pad(new_m - m, new_n - n);
+        m2.pad(new_m - m, new_n - n);
         
-        let _x_write_event = queue.enqueue_write_buffer(&mut x, CL_BLOCKING, 0, &m1.get_all(), &[])?;
-        let y_write_event = queue.enqueue_write_buffer(&mut y, CL_BLOCKING, 0, &m2.get_all(), &[])?;
+        let _x_write_event = queue.enqueue_write_buffer(&mut a, CL_BLOCKING, 0, &m1.get_all(), &[])?;
+        let _y_write_event = queue.enqueue_write_buffer(&mut b, CL_BLOCKING, 0, &m2.get_all(), &[])?;
         
-        let kernel_event = 
-            ExecuteKernel::new(&kernel)
-                .set_arg(&z)
-                .set_arg(&x)
-                .set_arg(&y)
-                .set_global_work_sizes(&[gs, 1, 1])
-                .set_local_work_sizes(&[64, 1, 1])
-                .set_wait_event(&y_write_event)
-                .enqueue_nd_range(&queue)?;
+        let kernel_event = yaif::kernel::get_madd_kernel_event(kernel, queue, new_m, new_n, &a, &b, &c)?;
         
         let mut events: Vec<cl_event> = Vec::default();
         events.push(kernel_event.get());
 
-        let mut r1 = vec![0.0; array_size];
+        let mut r1 = vec![0.0; worst_case];
         
-        let read_event = queue.enqueue_read_buffer(&z, CL_BLOCKING, 0, &mut r1, &events)?;
+        let read_event = queue.enqueue_read_buffer(&c, CL_BLOCKING, 0, &mut r1, &events)?;
         read_event.wait()?;
-        let mut r = Matrix::new(size, size);
-        r.fill_vec(&r1);
 
-        assert_eq!(r, m1.add(&m2).unwrap(), "OpenCL Matrix Matrix Addition is not working properly!");
+        let mut r = Matrix::new(m, n);
+        r.fill_fit(&r1, new_n);
+
+        assert_eq!(r, check_m1.add(&check_m2).unwrap(), "OpenCL Matrix Matrix Addition is not working properly!");
 
         let start_time = kernel_event.profiling_command_start()?;
         let end_time = kernel_event.profiling_command_end()?;
@@ -148,38 +152,52 @@ fn test_smul(kernel: &Kernel, context: &Context, queue: &CommandQueue, tests: us
 }
 
 fn test_mmul(kernel: &Kernel, context: &Context, queue: &CommandQueue, tests: usize, size: usize) -> Result<u64> {
-    let array_size = size * size;
+    let worst_case = (if size % 32 != 0 { (size / 32 + 1) * 32 } else { size }).pow(2);
 
-    let mut A = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, array_size, ptr::null_mut())?;
-    let mut B = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, array_size, ptr::null_mut())?;
-    let C = Buffer::<cl_float>::create(&context, CL_MEM_READ_WRITE, array_size, ptr::null_mut())?;
+    let mut A = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, worst_case, ptr::null_mut())?;
+    let mut B = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, worst_case, ptr::null_mut())?;
+    let C = Buffer::<cl_float>::create(&context, CL_MEM_READ_WRITE, worst_case, ptr::null_mut())?;
     
     let mut dur = 0;
 
     for _ in 0..tests {
-        let (m1, m2) = init_mat(size);
-
-        let m = size;
-        let n = size;
-        let k = size;
-        let s = size as u32;
+        // let m = rand::thread_rng().gen_range(10..size);
+        // let n = rand::thread_rng().gen_range(10..size);
+        // let k = rand::thread_rng().gen_range(10..size);
+        let m = 17;
+        let k = 13;
+        let n = 9;
+        let mut m1 = Matrix::new(m, k);
+        let mut m2 = Matrix::new(k, n);
+        println!("m1: {:?}", m1.get_dim());
+        println!("m2: {:?}", m2.get_dim());
+        println!("r:  ({}, {})", m, n);
+        m1.fill(2.0);
+        m2.fill(3.0);
+        let check_m1 = m1.clone();
+        let check_m2 = m2.clone();
+        let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+        let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+        let new_k = if k % 32 != 0 { (k / 32 + 1) * 32 } else { k };
+        m1.pad(new_m - m, new_k - k);
+        m2.pad(new_k - k, new_n - n);
 
         let _a_write_event = queue.enqueue_write_buffer(&mut A, CL_BLOCKING, 0, &m1.get_all(), &[])?;
         let _x_write_event = queue.enqueue_write_buffer(&mut B, CL_BLOCKING, 0, &m2.get_all(), &[])?;
-
-        let kernel_event = yaif::kernel::get_mmul_kernel_event(kernel, queue, m as u32, n as u32, k as u32, &A, &B, &C)?;
+        
+        let kernel_event = yaif::kernel::get_mmul_kernel_event(kernel, queue, new_m, new_n, new_k, &A, &B, &C)?;
         
         let mut events: Vec<cl_event> = Vec::default();
         events.push(kernel_event.get());
 
-        let mut r1 = vec![0.0; array_size];
+        let mut r1 = vec![0.0; worst_case];
         
         let read_event = queue.enqueue_read_buffer(&C, CL_BLOCKING, 0, &mut r1, &events)?;
         read_event.wait()?;
-        let mut r = Matrix::new(size, size);
-        r.fill_vec(&r1);
+        let mut r = Matrix::new(m, n);
+        r.fill_fit(&r1, new_m);
 
-        assert_eq!(r, m1.multiply(&m2).unwrap(), "OpenCL Matrix Matrix Multiplication is not working properly!");
+        assert_eq!(r, check_m1.multiply(&check_m2).unwrap(), "OpenCL Matrix Matrix Multiplication is not working properly!");
         
         let start_time = kernel_event.profiling_command_start()?;
         let end_time = kernel_event.profiling_command_end()?;
@@ -234,16 +252,16 @@ fn main() -> Result<()> {
 
     while actual_size < (1 << 15) as f64 {
         let size = actual_size as usize;
-        // let now = Instant::now();
-        // time_init(TESTS, size);
-        // let elapsed = now.elapsed();
+        let now = Instant::now();
+        time_init(TESTS, size);
+        let elapsed = now.elapsed();
         // println!("Init Matrix ({:4}x{:4}) {:?}", size, size, elapsed);
-        // let cl_dur = time_cl(&add_kernel, &context, &queue, TESTS, size, "add");
-        // println!(" -- OpenCL matrix matrix addition       ({:4}x{:4}): {:16?}ns", size, size, cl_dur);
-        // let now = Instant::now();
-        // time_basic(TESTS, size, "add");
-        // let basic_dur = now.elapsed().as_nanos() - elapsed.as_nanos();
-        // println!(" -- Basic matrix matrix addition        ({:4}x{:4}): {:16?}ns", size, size, basic_dur);
+        let cl_dur = time_cl(&add_kernel, &context, &queue, TESTS, size, "add");
+        println!(" -- OpenCL matrix matrix addition       ({:4}x{:4}): {:16?}ns", size, size, cl_dur);
+        let now = Instant::now();
+        time_basic(TESTS, size, "add");
+        let basic_dur = now.elapsed().as_nanos() - elapsed.as_nanos();
+        println!(" -- Basic matrix matrix addition        ({:4}x{:4}): {:16?}ns", size, size, basic_dur);
 
         // let cl_dur = time_cl(&mul_scalar_kernel, &context, &queue, TESTS, size, "smul");
         // println!(" -- OpenCL matrix scalar multiplication ({:4}x{:4}): {:16?}ns", size, size, cl_dur);
@@ -252,8 +270,8 @@ fn main() -> Result<()> {
         // let basic_dur = now.elapsed().as_nanos() - elapsed.as_nanos();
         // println!(" -- Basic matrix scalar multiplication  ({:4}x{:4}): {:16?}ns", size, size, basic_dur);
         
-        let cl_dur = time_cl(&mul_matrix_kernel, &context, &queue, TESTS, size, "mmul");
-        println!(" -- OpenCL matrix matrix multiplication ({:5}x{:5}): {:16?}ns", size, size, cl_dur);
+        // let cl_dur = time_cl(&mul_matrix_kernel, &context, &queue, TESTS, size, "mmul");
+        // println!(" -- OpenCL matrix matrix multiplication ({:5}x{:5}): {:16?}ns", size, size, cl_dur);
         // let now = Instant::now();
         // time_basic(TESTS, size, "mmul");
         // let basic_dur = now.elapsed().as_nanos() - elapsed.as_nanos();

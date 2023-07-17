@@ -98,9 +98,9 @@ impl Matrix {
     }
 
     pub fn fill_fit(&mut self, values: &Vec<f32>, dim: usize) {
-        for y in 0..self.cols {
-            for x in 0..self.rows {
-                self.set_unchecked(x, y, values[y * dim + x]);
+        for x in 0..self.rows {
+            for y in 0..self.cols {
+                self.set_unchecked(x, y, values[x * dim + y]);
             }
         }
     }
