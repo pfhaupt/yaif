@@ -46,7 +46,36 @@ kernel void matrix_add(
     const int globalRow = get_global_id(0);
     const int globalCol = get_global_id(1);
     const int i = globalCol * M + globalRow;
-    C[i] = A[i] + B[i];
+    if (i < M * N) C[i] = A[i] + B[i];
+}"#;
+
+const SUB_MATRIX_NAME: &str = "matrix_sub";
+const SUB_MATRIX_SOURCE: &str = r#"
+kernel void matrix_sub(
+    const int M,
+    const int N,
+    global float const* A,
+    global float const* B,
+    global float* C)
+{
+    const int globalRow = get_global_id(0);
+    const int globalCol = get_global_id(1);
+    const int i = globalCol * M + globalRow;
+    if (i < M * N) C[i] = A[i] - B[i];
+}"#;
+
+const ADD_MATRIX_INLINE_NAME: &str = "matrix_add_inline";
+const ADD_MATRIX_INLINE_SOURCE: &str = r#"
+kernel void matrix_add_inline(
+    const int M,
+    const int N,
+    global float* A,
+    global float const* B)
+{
+    const int globalRow = get_global_id(0);
+    const int globalCol = get_global_id(1);
+    const int i = globalCol * M + globalRow;
+    if (i < M * N) A[i] = A[i] + B[i];
 }"#;
 
 
@@ -61,7 +90,7 @@ kernel void matrix_mul_scalar(
     const int globalRow = get_global_id(0);
     const int globalCol = get_global_id(1);
     const int i = globalCol * M + globalRow;
-    x[i] = x[i] * y;
+    if (i < M * N) x[i] = x[i] * y;
 }"#;
 
 
@@ -275,30 +304,125 @@ kernel void matrix_fill(
     global float* x,
     float y)
 {
-    const int i = get_global_id(0);
+    const int globalRow = get_global_id(0);
+    const int globalCol = get_global_id(1);
+    const int i = globalCol * M + globalRow;
     if (i < M) x[i] = y;
 }
 "#;
 
-const FILL_GAUSS_NAME: &str = "matrix_gauss";
-const FILL_GAUSS_SOURCE: &str =
+const FILL_MATRIX_VEC_NAME: &str = "matrix_vec_fill";
+const FILL_MATRIX_VEC_SOURCE: &str =
 r#"
-kernel void matrix_gauss(
+kernel void matrix_vec_fill(
     const int M,
     global float* x,
-    global float* gauss)
+    global float* y)
 {
-    const int i = get_global_id(0);
-    if (i < M) x[i] = gauss[i];
+    const int globalRow = get_global_id(0);
+    const int globalCol = get_global_id(1);
+    const int i = globalCol * M + globalRow;
+    if (i < M) x[i] = y[i];
 }
 "#;
 
-const IMPLEMENTED_KERNELS: [&str; 5] = [
+const SIGMOID_NAME: &str = "sigmoid";
+const SIGMOID_SOURCE: &str =
+r#"
+#define SIGMOID(i) (1.0 / (1.0 + exp(-(i))))
+kernel void sigmoid(
+    const int M,
+    const int N,
+    global float const* A,
+    global float* B)
+{
+    const int globalRow = get_global_id(0);
+    const int globalCol = get_global_id(1);
+    const int i = globalCol * M + globalRow;
+    if (i < M * N) B[i] = SIGMOID(A[i]);
+}"#;
+
+const DER_SIGMOID_NAME: &str = "der_sigmoid";
+const DER_SIGMOID_SOURCE: &str =
+r#"
+#define SIGMOID(i) (1.0 / (1.0 + exp(-(i))))
+kernel void der_sigmoid(
+    const int M,
+    const int N,
+    global float const* A,
+    global float* B)
+{
+    const int globalRow = get_global_id(0);
+    const int globalCol = get_global_id(1);
+    const int i = globalCol * M + globalRow;
+    if (i < M * N) {
+        float s = SIGMOID(A[i]);
+        B[i] = s * (1.0 - s);
+    }
+}"#;
+
+const HADAMARD_NAME: &str = "matrix_hadamard";
+const HADAMARD_SOURCE: &str = r#"
+kernel void matrix_hadamard(
+    const int M,
+    const int N,
+    global float const* A,
+    global float const* B,
+    global float* C)
+{
+    const int globalRow = get_global_id(0);
+    const int globalCol = get_global_id(1);
+    const int i = globalCol * M + globalRow;
+    if (i < M * N) C[i] = A[i] * B[i];
+}"#;
+
+const TRANSPOSE_NAME: &str = "matrix_transpose";
+const TRANSPOSE_SOURCE: &str =
+r#"
+kernel void matrix_transpose(
+    const int M,
+    const int N,
+    global float* A,
+    global float* B)
+{
+    const int globalRow = get_global_id(0);
+    const int globalCol = get_global_id(1);
+    const int i = globalRow + M * globalCol;
+    const int j = globalCol + N * globalRow;
+    B[j] = A[i];
+}"#;
+
+const DYADIC_NAME: &str = "matrix_dyadic";
+const DYADIC_SOURCE: &str =
+r#"
+kernel void matrix_dyadic(
+    const int M,
+    const int N,
+    global float const* A,
+    global float const* B,
+    global float* C)
+{
+    const int i = get_global_id(0);
+    for (int j = 0; j < N; j++) {
+        float v = A[i] * B[j];
+        C[i * N + j] = v;
+    }
+}
+"#;
+
+const IMPLEMENTED_KERNELS: [&str; 12] = [
     ADD_MATRIX_NAME,
+    ADD_MATRIX_INLINE_NAME,
+    SUB_MATRIX_NAME,
     MUL_MATRIX_NAME,
     MUL_SCALAR_NAME,
     FILL_MATRIX_NAME,
-    FILL_GAUSS_NAME];
+    FILL_MATRIX_VEC_NAME,
+    HADAMARD_NAME,
+    DYADIC_NAME,
+    TRANSPOSE_NAME,
+    SIGMOID_NAME,
+    DER_SIGMOID_NAME];
 
 fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, k: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
     let mut exec_kernel = ExecuteKernel::new(&kernel);
@@ -356,6 +480,29 @@ fn get_madd_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usi
         .enqueue_nd_range(&queue)
 }
 
+fn get_msub_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
+    ExecuteKernel::new(&kernel)
+        .set_arg(&(m as u32))
+        .set_arg(&(n as u32))
+        .set_arg(a)
+        .set_arg(b)
+        .set_arg(c)
+        .set_global_work_sizes(&[m, n, 1])
+        .set_local_work_sizes(&[TS, TS, 1])
+        .enqueue_nd_range(&queue)
+}
+
+fn get_madd_inline_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, b: &Buffer<f32>) -> Result<Event> {
+    ExecuteKernel::new(&kernel)
+        .set_arg(&(m as u32))
+        .set_arg(&(n as u32))
+        .set_arg(a)
+        .set_arg(b)
+        .set_global_work_sizes(&[m, n, 1])
+        .set_local_work_sizes(&[TS, TS, 1])
+        .enqueue_nd_range(&queue)
+}
+
 fn get_smul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, scalar: f32) -> Result<Event> {
     ExecuteKernel::new(&kernel)
         .set_arg(&(m as u32))
@@ -377,15 +524,73 @@ fn get_fill_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, size: 
         .enqueue_nd_range(&queue)
 }
 
-fn get_gauss_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, size: usize, a: &Buffer<f32>, gauss: &Buffer<f32>) -> Result<Event> {
+fn get_fill_vec_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, size: usize, a: &Buffer<f32>, b: &Buffer<f32>) -> Result<Event> {
     ExecuteKernel::new(&kernel)
         .set_arg(&(m as u32))
         .set_arg(a)
-        .set_arg(gauss)
+        .set_arg(b)
         .set_global_work_sizes(&[size, 1, 1])
         .set_local_work_sizes(&[TS, 1, 1])
         .enqueue_nd_range(&queue)
 }
+
+fn get_hadamard_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
+    ExecuteKernel::new(&kernel)
+        .set_arg(&(m as u32))
+        .set_arg(&(n as u32))
+        .set_arg(a)
+        .set_arg(b)
+        .set_arg(c)
+        .set_global_work_sizes(&[m, n, 1])
+        .set_local_work_sizes(&[TS, TS, 1])
+        .enqueue_nd_range(&queue)
+}
+
+fn get_dyadic_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
+    ExecuteKernel::new(&kernel)
+        .set_arg(&(m as u32))
+        .set_arg(&(n as u32))
+        .set_arg(a)
+        .set_arg(b)
+        .set_arg(c)
+        .set_global_work_sizes(&[m, n, 1])
+        .set_local_work_sizes(&[TS, TS, 1])
+        .enqueue_nd_range(&queue)
+}
+
+fn get_transpose_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, b: &Buffer<f32>) -> Result<Event> {
+    ExecuteKernel::new(&kernel)
+        .set_arg(&(m as u32))
+        .set_arg(&(n as u32))
+        .set_arg(a)
+        .set_arg(b)
+        .set_global_work_sizes(&[m, n, 1])
+        .set_local_work_sizes(&[TS, TS, 1])
+        .enqueue_nd_range(&queue)
+}
+
+fn get_sigmoid_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, b: &Buffer<f32>) -> Result<Event> {
+    ExecuteKernel::new(&kernel)
+        .set_arg(&(m as u32))
+        .set_arg(&(n as u32))
+        .set_arg(a)
+        .set_arg(b)
+        .set_global_work_sizes(&[m, n, 1])
+        .set_local_work_sizes(&[TS, TS, 1])
+        .enqueue_nd_range(&queue)
+}
+
+fn get_der_sigmoid_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, b: &Buffer<f32>) -> Result<Event> {
+    ExecuteKernel::new(&kernel)
+        .set_arg(&(m as u32))
+        .set_arg(&(n as u32))
+        .set_arg(a)
+        .set_arg(b)
+        .set_global_work_sizes(&[m, n, 1])
+        .set_local_work_sizes(&[TS, TS, 1])
+        .enqueue_nd_range(&queue)
+}
+
 pub struct ClStruct {
     device: Device,
     context: Context,
@@ -416,31 +621,29 @@ impl ClStruct {
     }
 
     pub fn load_kernels(&mut self) {
-        assert!(IMPLEMENTED_KERNELS.len() == 5, "Can not load all kernels yet");
+        assert!(IMPLEMENTED_KERNELS.len() == 12, "Can not load all kernels yet");
+        let mut add_kernel = |name: &str, source: &str| {
+            let p = self.load_program(source);
+            let k = self.load_kernel(&p, name);
+            self.kernels.insert(String::from(name), k);
+        };
+        add_kernel(ADD_MATRIX_NAME, ADD_MATRIX_SOURCE);
+        add_kernel(ADD_MATRIX_INLINE_NAME, ADD_MATRIX_INLINE_SOURCE);
+        add_kernel(SUB_MATRIX_NAME, SUB_MATRIX_SOURCE);
+        add_kernel(MUL_SCALAR_NAME, MUL_SCALAR_SOURCE);
+        add_kernel(MUL_MATRIX_NAME, MUL_MATRIX_SOURCE);
+        add_kernel(FILL_MATRIX_NAME, FILL_MATRIX_SOURCE);
+        add_kernel(FILL_MATRIX_VEC_NAME, FILL_MATRIX_VEC_SOURCE);
+        add_kernel(HADAMARD_NAME, HADAMARD_SOURCE);
+        add_kernel(TRANSPOSE_NAME, TRANSPOSE_SOURCE);
+        add_kernel(DYADIC_NAME, DYADIC_SOURCE);
+        add_kernel(SIGMOID_NAME, SIGMOID_SOURCE);
+        add_kernel(DER_SIGMOID_NAME, DER_SIGMOID_SOURCE);
 
-        let add_prog = self.load_program(ADD_MATRIX_SOURCE);
-        let add_kernel = self.load_kernel(&add_prog, ADD_MATRIX_NAME);
-        self.kernels.insert(String::from(ADD_MATRIX_NAME), add_kernel);
-
-        let smul_prog = self.load_program(MUL_SCALAR_SOURCE);
-        let smul_kernel = self.load_kernel(&smul_prog, MUL_SCALAR_NAME);
-        self.kernels.insert(String::from(MUL_SCALAR_NAME), smul_kernel);
-
-        let mmul_prog = self.load_program(MUL_MATRIX_SOURCE);
-        let mmul_kernel = self.load_kernel(&mmul_prog, MUL_MATRIX_NAME);
-        self.kernels.insert(String::from(MUL_MATRIX_NAME), mmul_kernel);
-
-        let fill_prog = self.load_program(FILL_MATRIX_SOURCE);
-        let fill_kernel = self.load_kernel(&fill_prog, FILL_MATRIX_NAME);
-        self.kernels.insert(String::from(FILL_MATRIX_NAME), fill_kernel);
-        
-        let gauss_prog = self.load_program(FILL_GAUSS_SOURCE);
-        let gauss_kernel = self.load_kernel(&gauss_prog, FILL_GAUSS_NAME);
-        self.kernels.insert(String::from(FILL_GAUSS_NAME), gauss_kernel);
     }
 
     pub fn create_buffer(&self, rows: usize, cols: usize) -> Option<Buffer<f32>> {
-        let b = Buffer::<cl_float>::create(&self.context, CL_MEM_READ_WRITE, rows * cols, ptr::null_mut());
+        let b = Buffer::<cl_float>::create(&self.context, CL_MEM_READ_WRITE, (rows * cols).max(1), ptr::null_mut());
         match b {
             Ok(bfr) => Some(bfr),
             Err(e) => panic!("Error when creating OpenCL buffer! {}", e)
@@ -461,7 +664,30 @@ impl ClStruct {
         }
     }
 
-    pub fn fill(&self, buffer: &Option<Buffer<f32>>, size: usize, val: f32) -> Result<()> {
+    pub fn fill_vec(&self, buffer: &Option<Buffer<f32>>, size: usize, values: Vec<f32>) -> Result<()> {
+        match self.kernels.get(&String::from(FILL_MATRIX_VEC_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(k) => {
+                match buffer {
+                    None => Err(ClError(-61)),
+                    Some(bfr) => {
+                        let new_size = if size % 32 != 0 { (size / 32 + 1) * 32 } else { size };
+                        
+                        let mut val_bfr = self.create_buffer(new_size, 1).ok_or(ClError(-61))?;
+                        let _x_write_event = self.queue.enqueue_write_buffer(&mut val_bfr, CL_BLOCKING, 0, &values, &[])?;
+            
+                        let fill_event = get_fill_vec_kernel_event(k,
+                            &self.queue, size, new_size, bfr, &val_bfr)?;
+                        let mut events: Vec<cl_event> = Vec::default();
+                        events.push(fill_event.get());
+                        Ok(())
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn fill_scalar(&self, buffer: &Option<Buffer<f32>>, size: usize, val: f32) -> Result<()> {
         match self.kernels.get(&String::from(FILL_MATRIX_NAME)) {
             None => panic!("Could not find kernel in HashMap!"),
             Some(k) => {
@@ -485,27 +711,219 @@ impl ClStruct {
     }
 
     pub fn fill_gauss(&self, buffer: &Option<Buffer<f32>>, size: usize, mean: f32, variance: f32) -> Result<()> {
-        match self.kernels.get(&String::from(FILL_GAUSS_NAME)) {
+        let new_size = if size % 32 != 0 { (size / 32 + 1) * 32 } else { size };
+                        
+        let mut r = vec![0.0; new_size];
+        let normal = Normal::new(mean, variance).unwrap();
+        for i in 0..new_size { r[i] = normal.sample(&mut rand::thread_rng()); }
+        self.fill_vec(buffer, size, r)
+    }
+
+    pub fn matrix_mult(&self, a: &mut Option<Buffer<f32>>, b: &mut Option<Buffer<f32>>, c: &mut Option<Buffer<f32>>, m: usize, n: usize, k: usize) -> Result<()> {
+        match self.kernels.get(&String::from(MUL_MATRIX_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(kernel) => {
+                let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+                let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+                let new_k = if k % 32 != 0 { (k / 32 + 1) * 32 } else { k };
+
+                let a = a.as_mut().unwrap();
+                let b = b.as_mut().unwrap();
+                let c = c.as_mut().unwrap();
+
+                let kernel_event = get_mmul_kernel_event(&kernel, &self.queue, new_m, new_n, new_k, a, b, c)?;
+                    
+                let mut events: Vec<cl_event> = Vec::default();
+                events.push(kernel_event.get());
+
+                Ok(())
+            }
+        }
+    }
+
+    pub fn matrix_add(&self, a: &mut Option<Buffer<f32>>, b: &mut Option<Buffer<f32>>, c: &mut Option<Buffer<f32>>, m: usize, n: usize) -> Result<()> {
+        match self.kernels.get(&String::from(ADD_MATRIX_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(kernel) => {
+                let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+                let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+                
+                let a = a.as_mut().unwrap();
+                let b = b.as_mut().unwrap();
+                let c = c.as_mut().unwrap();
+
+                let kernel_event = get_madd_kernel_event(&kernel, &self.queue, new_m, new_n, a, b, c)?;
+                    
+                let mut events: Vec<cl_event> = Vec::default();
+                events.push(kernel_event.get());
+
+                Ok(())
+
+            }
+        }
+    }
+
+    pub fn matrix_sub(&self, a: &mut Option<Buffer<f32>>, b: &mut Option<Buffer<f32>>, c: &mut Option<Buffer<f32>>, m: usize, n: usize) -> Result<()> {
+        match self.kernels.get(&String::from(SUB_MATRIX_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(kernel) => {
+                let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+                let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+                
+                let a = a.as_mut().unwrap();
+                let b = b.as_mut().unwrap();
+                let c = c.as_mut().unwrap();
+
+                let kernel_event = get_msub_kernel_event(&kernel, &self.queue, new_m, new_n, a, b, c)?;
+                    
+                let mut events: Vec<cl_event> = Vec::default();
+                events.push(kernel_event.get());
+
+                Ok(())
+
+            }
+        }
+    }
+
+    pub fn matrix_add_inline(&self, a: &mut Option<Buffer<f32>>, b: &mut Option<Buffer<f32>>, m: usize, n: usize) -> Result<()> {
+        match self.kernels.get(&String::from(ADD_MATRIX_INLINE_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(kernel) => {
+                let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+                let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+                
+                let a = a.as_mut().unwrap();
+                let b = b.as_mut().unwrap();
+
+                let kernel_event = get_madd_inline_kernel_event(&kernel, &self.queue, new_m, new_n, a, b)?;
+                    
+                let mut events: Vec<cl_event> = Vec::default();
+                events.push(kernel_event.get());
+
+                Ok(())
+
+            }
+        }
+    }
+
+    pub fn matrix_hadamard(&self, a: &mut Option<Buffer<f32>>, b: &mut Option<Buffer<f32>>, c: &mut Option<Buffer<f32>>, m: usize, n: usize) -> Result<()> {
+        match self.kernels.get(&String::from(HADAMARD_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(kernel) => {
+                let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+                let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+                
+                let a = a.as_mut().unwrap();
+                let b = b.as_mut().unwrap();
+                let c = c.as_mut().unwrap();
+
+                let kernel_event = get_hadamard_kernel_event(&kernel, &self.queue, new_m, new_n, a, b, c)?;
+                    
+                let mut events: Vec<cl_event> = Vec::default();
+                events.push(kernel_event.get());
+
+                Ok(())
+            }
+        }
+    }
+    
+    pub fn matrix_transpose(&self, a: &mut Option<Buffer<f32>>, b: &mut Option<Buffer<f32>>, m: usize, n: usize) -> Result<()> {
+        match self.kernels.get(&String::from(TRANSPOSE_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(kernel) => {
+                let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+                let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+                
+                let a = a.as_mut().unwrap();
+                let b = b.as_mut().unwrap();
+
+                let kernel_event = get_transpose_kernel_event(&kernel, &self.queue, new_m, new_n, a, b)?;
+                    
+                let mut events: Vec<cl_event> = Vec::default();
+                events.push(kernel_event.get());
+
+                Ok(())
+
+            }
+        }
+    }
+
+    pub fn matrix_dyadic(&self, a: &mut Option<Buffer<f32>>, b: &mut Option<Buffer<f32>>, c: &mut Option<Buffer<f32>>, m: usize, n: usize) -> Result<()> {
+        match self.kernels.get(&String::from(DYADIC_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(kernel) => {
+                let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+                let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+                
+                let a = a.as_mut().unwrap();
+                let b = b.as_mut().unwrap();
+                let c = c.as_mut().unwrap();
+
+                let kernel_event = get_dyadic_kernel_event(&kernel, &self.queue, new_m, new_n, a, b, c)?;
+                    
+                let mut events: Vec<cl_event> = Vec::default();
+                events.push(kernel_event.get());
+
+                Ok(())
+            }
+        }
+    }
+
+    pub fn sigmoid(&self, a: &mut Option<Buffer<f32>>, b: &mut Option<Buffer<f32>>, m: usize, n: usize) -> Result<()> {
+        match self.kernels.get(&String::from(SIGMOID_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(kernel) => {
+                let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+                let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+                
+                let a = a.as_mut().unwrap();
+                let b = b.as_mut().unwrap();
+
+                let kernel_event = get_sigmoid_kernel_event(&kernel, &self.queue, new_n, new_m, a, b)?;
+                    
+                let mut events: Vec<cl_event> = Vec::default();
+                events.push(kernel_event.get());
+
+                Ok(())
+            }
+        }
+    }
+
+    pub fn der_sigmoid(&self, a: &mut Option<Buffer<f32>>, b: &mut Option<Buffer<f32>>, m: usize, n: usize) -> Result<()> {
+        match self.kernels.get(&String::from(DER_SIGMOID_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(kernel) => {
+                let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+                let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+                
+                let a = a.as_mut().unwrap();
+                let b = b.as_mut().unwrap();
+
+                let kernel_event = get_der_sigmoid_kernel_event(&kernel, &self.queue, new_n, new_m, a, b)?;
+                    
+                let mut events: Vec<cl_event> = Vec::default();
+                events.push(kernel_event.get());
+
+                Ok(())
+            }
+        }
+    }
+
+    pub fn copy_buffer(&self, a: &mut Option<Buffer<f32>>, b: &mut Option<Buffer<f32>>, m: usize, n: usize) -> Result<()> {
+        match self.kernels.get(&String::from(FILL_MATRIX_VEC_NAME)) {
             None => panic!("Could not find kernel in HashMap!"),
             Some(k) => {
-                match buffer {
-                    None => Err(ClError(-61)),
-                    Some(bfr) => {
-                        let new_size = if size % 32 != 0 { (size / 32 + 1) * 32 } else { size };
-                        
-                        let mut r = vec![0.0; new_size];
-                        let normal = Normal::new(mean, variance).unwrap();
-                        for i in 0..new_size { r[i] = normal.sample(&mut rand::thread_rng()); }
-                        let mut gauss_bfr = self.create_buffer(new_size, 1).ok_or(ClError(-61))?;
-                        let _x_write_event = self.queue.enqueue_write_buffer(&mut gauss_bfr, CL_BLOCKING, 0, &r, &[])?;
-            
-                        let fill_event = get_gauss_kernel_event(k,
-                            &self.queue, size, new_size, bfr, &gauss_bfr)?;
-                        let mut events: Vec<cl_event> = Vec::default();
-                        events.push(fill_event.get());
-                        Ok(())
-                    }
-                }
+                let size = m * n;
+                let new_size = if size % 32 != 0 { (size / 32 + 1) * 32 } else { size };
+                
+                let a = a.as_mut().unwrap();
+                let b = b.as_mut().unwrap();
+
+                let fill_event = get_fill_vec_kernel_event(k,
+                    &self.queue, size, new_size, a, b)?;
+                let mut events: Vec<cl_event> = Vec::default();
+                events.push(fill_event.get());
+                Ok(())
             }
         }
     }
