@@ -7,9 +7,9 @@ use opencl3::memory::Buffer;
 use opencl3::Result;
 
 
-const MMUL_VERSION: usize = 1;
+const MMUL_VERSION: usize = 3;
 
-pub const TS: usize = 16;
+pub const TS: usize = 32;
 
 const WPT: usize = 4;
 const RTS: usize = TS / WPT;
@@ -44,10 +44,14 @@ kernel void matrix_add(
 pub const MUL_SCALAR_NAME: &str = "matrix_mul_scalar";
 pub const MUL_SCALAR_SOURCE: &str = r#"
 kernel void matrix_mul_scalar(
+    const int M,
+    const int N,
     global float* x,
     float y)
 {
-    size_t i = get_global_id(0);
+    const int globalRow = get_global_id(0);
+    const int globalCol = get_global_id(1);
+    const int i = globalCol * M + globalRow;
     x[i] = x[i] * y;
 }"#;
 
@@ -76,7 +80,7 @@ kernel void matrix_mul_matrix(
 "#
 } else if MMUL_VERSION == 2 { // Version 2 (working)
 r#"
-#define TS 16
+#define TS 32
 kernel void matrix_mul_matrix(
     const int M,
     const int N,
@@ -114,7 +118,7 @@ kernel void matrix_mul_matrix(
 "#
 } else if MMUL_VERSION == 3 { // Version 3 (working)
 r#"
-#define TS 16
+#define TS 32
 #define WPT 4
 #define RTS (TS / WPT)
 kernel void matrix_mul_matrix(
@@ -160,11 +164,11 @@ kernel void matrix_mul_matrix(
     }
 }
 "#
-} else if MMUL_VERSION == 4 { // Version 4 (working, but slow)
+} else if MMUL_VERSION == 4 { // Version 4 (not working anymore :( )
 r#"
 #define MOD2(x,y) ((x) % (y))
 #define DIV2(x,y) ((x) / (y))
-#define TS 16
+#define TS 32
 #define WPT 4
 #define RTS (TS / WPT)
 #define TSM 8
@@ -305,6 +309,17 @@ pub fn get_madd_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n:
         .set_arg(a)
         .set_arg(b)
         .set_arg(c)
+        .set_global_work_sizes(&[m, n, 1])
+        .set_local_work_sizes(&[TS, TS, 1])
+        .enqueue_nd_range(&queue)
+}
+
+pub fn get_smul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, scalar: f32) -> Result<Event> {
+    ExecuteKernel::new(&kernel)
+        .set_arg(&(m as u32))
+        .set_arg(&(n as u32))
+        .set_arg(a)
+        .set_arg(&scalar)
         .set_global_work_sizes(&[m, n, 1])
         .set_local_work_sizes(&[TS, TS, 1])
         .enqueue_nd_range(&queue)
