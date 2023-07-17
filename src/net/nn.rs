@@ -1,4 +1,4 @@
-use super::super::matrix::Matrix;
+use super::{super::matrix::Matrix, NetTrait};
 use super::super::data_set::DataSet;
 use std::fmt::{ Debug, Formatter };
 
@@ -7,10 +7,10 @@ const LEARN_FACTOR: f32 = 0.05;
 // const LEARN_REG_BATCH_FACTOR: f32 = 1.0;
 const TARGET_ACCURACY: f32 = 0.95;
 const FLOATING_WEIGHT: f32 = 0.0;
-const VALIDATION_SIZE: usize = 100;
+const VALIDATION_SIZE: usize = 500;
 
-const BATCH_SIZE: usize = 50;
-const TRAINING_DATA: usize = 1_000;
+const BATCH_SIZE: usize = 100;
+const TRAINING_DATA: usize = 2_500;
 const EPOCH_SIZE: usize = TRAINING_DATA / BATCH_SIZE;
 const EPOCH_COUNT: usize = 100;
 
@@ -78,21 +78,7 @@ impl Debug for NN {
     }
 }
 
-impl NN {
-    pub fn new(layer_sizes: Vec<usize>) -> Result<Self, &'static str> {
-        if layer_sizes.len() == 1 {
-            Err("Network only has one layer.")
-        } else if layer_sizes.len() < 1 {
-            Err("Network has no layers.")
-        } else {
-            let mut result: NN = Default::default();
-            result.initialize_layers(layer_sizes);
-            result.initialize_network();
-            // println!("Initialized a Neural Network!\n{:?}", result);
-            Ok(result)
-        }
-    }
-
+impl NetTrait for NN {
     fn initialize_layers(&mut self, layer_sizes: Vec<usize>) {
         self.layer_lengths = layer_sizes.clone();
         self.layer_count = self.layer_lengths.len();
@@ -155,46 +141,16 @@ impl NN {
         }
     }
 
-    pub fn initialize_training_data(&mut self, data: &DataSet) {
+    fn initialize_training_data(&mut self, data: &DataSet) {
         self.training_data = data.clone();
         self.initialize_validation_data(data);
     }
 
-    pub fn initialize_validation_data(&mut self, data: &DataSet) {
+    fn initialize_validation_data(&mut self, data: &DataSet) {
         self.validation_data = data.clone();
     }
 
-    pub fn train(&mut self) {
-        let index = self.training_data.get_random_index();
-        let input = self.training_data.get_input(index).as_vec();
-        let output = self.training_data.get_output(index);
-        // println!("{:?} {:?}", input, output);
-        self.internal_train(&input, &output.as_vec());
-    }
-
-    fn internal_train(&mut self, input: &Vec<f32>, output: &Vec<f32>) {
-        self.set_target(output);
-        self.set_input(input);
-        self.learn();
-    }
-
-    pub fn adapt_weights(&mut self) {
-        // println!("{:?}", self);
-        for i in (0..=self.last_layer).rev() {
-            self.avg_bias[i].multiply_scalar(LEARN_FACTOR);
-            self.bias[i] = self.bias[i].sub(&self.avg_bias[i]).unwrap();
-
-            // self.weights[i].multiply_scalar(LEARN_REG_BATCH_FACTOR);
-            self.avg_weight[i].multiply_scalar(LEARN_FACTOR);
-            self.weights[i] = self.weights[i].sub(&self.avg_weight[i]).unwrap();
-        }
-        for i in 0..self.layer_count {
-            self.avg_bias[i].fill(0.0);
-            self.avg_weight[i].fill(0.0);
-        }
-    }
-
-    pub fn is_finished(&mut self) -> bool {
+    fn is_finished(&mut self) -> bool {
         self.get_average_accuracy() >= TARGET_ACCURACY
     }
 
@@ -204,23 +160,7 @@ impl NN {
         self.floating_average
     }
 
-    fn generate_validation(&mut self) -> f32 {
-        let mut correct = 0;
-        let mut total = 0;
-        for _ in 0..VALIDATION_SIZE {
-            let index = self.validation_data.get_random_index();
-            let input = self.validation_data.get_input(index).as_vec();
-            let output = self.validation_data.get_output(index);
-            let g = self.guess(&input);
-            if g == output.get_solution() as usize {
-                correct += 1;
-            }
-            total += 1;
-        }
-        (correct as f32) / (total as f32)
-    }
-
-    pub fn run(&mut self, debug: bool) -> bool {
+    fn run(&mut self, debug: bool) -> bool {
         for _ in 0..EPOCH_COUNT {
             for _ in 0..EPOCH_SIZE {
                 for _ in 0..BATCH_SIZE {
@@ -236,14 +176,6 @@ impl NN {
             }
         }
         false
-    }
-
-    fn set_target(&mut self, target: &Vec<f32>) {
-        self.target_vector.fill_vec(target);
-    }
-
-    fn set_input(&mut self, input: &Vec<f32>) {
-        self.layers[0].fill_vec(input);
     }
 
     fn learn(&mut self) {
@@ -279,16 +211,6 @@ impl NN {
         }
     }
 
-    pub fn print_guess(&mut self) {
-        for _ in 0..10 {
-            let index = self.validation_data.get_random_index();
-            let input = self.validation_data.get_input(index).as_vec();
-            let output = self.validation_data.get_output(index);
-            let g = self.guess(&input);
-            println!("Guess: {}, Solution: {}", g, output.get_solution());
-        }
-    }
-
     fn guess(&mut self, input: &Vec<f32>) -> usize {
         self.set_input(input);
 
@@ -319,6 +241,14 @@ impl NN {
         }
     }
 
+    fn set_target(&mut self, target: &Vec<f32>) {
+        self.target_vector.fill_vec(target);
+    }
+
+    fn set_input(&mut self, input: &Vec<f32>) {
+        self.layers[0].fill_vec(input);
+    }
+
     fn calculate_cost(&mut self) {
         self.current_cost = self.layers[self.last_layer].sub(&self.target_vector).unwrap();
     }
@@ -327,6 +257,79 @@ impl NN {
         for i in 1..self.layer_count {
             self.calculate_layer(i);
         }
+    }
+
+    fn print_guess(&mut self) {
+        for _ in 0..10 {
+            let index = self.validation_data.get_random_index();
+            let input = self.validation_data.get_input(index).as_vec();
+            let output = self.validation_data.get_output(index);
+            let g = self.guess(&input);
+            println!("Guess: {}, Solution: {}", g, output.get_solution());
+        }
+        println!("Average: {:.2}%", self.floating_average * 100.0);
+    }
+}
+
+impl NN {
+    pub fn new(layer_sizes: Vec<usize>) -> Result<Self, &'static str> {
+        if layer_sizes.len() == 1 {
+            Err("Network only has one layer.")
+        } else if layer_sizes.len() < 1 {
+            Err("Network has no layers.")
+        } else {
+            let mut result: NN = Default::default();
+            result.initialize_layers(layer_sizes);
+            result.initialize_network();
+            // println!("Initialized a Neural Network!\n{:?}", result);
+            Ok(result)
+        }
+    }
+
+    fn train(&mut self) {
+        let index = self.training_data.get_random_index();
+        let input = self.training_data.get_input(index).as_vec();
+        let output = self.training_data.get_output(index);
+        // println!("{:?} {:?}", input, output);
+        self.internal_train(&input, &output.as_vec());
+    }
+
+    fn internal_train(&mut self, input: &Vec<f32>, output: &Vec<f32>) {
+        self.set_target(output);
+        self.set_input(input);
+        self.learn();
+    }
+
+    fn adapt_weights(&mut self) {
+        // println!("{:?}", self);
+        for i in (0..=self.last_layer).rev() {
+            self.avg_bias[i].multiply_scalar(LEARN_FACTOR);
+            self.bias[i] = self.bias[i].sub(&self.avg_bias[i]).unwrap();
+
+            // self.weights[i].multiply_scalar(LEARN_REG_BATCH_FACTOR);
+            self.avg_weight[i].multiply_scalar(LEARN_FACTOR);
+            self.weights[i] = self.weights[i].sub(&self.avg_weight[i]).unwrap();
+        }
+        for i in 0..self.layer_count {
+            self.avg_bias[i].fill(0.0);
+            self.avg_weight[i].fill(0.0);
+        }
+    }
+
+    fn generate_validation(&mut self) -> f32 {
+        let mut correct = 0;
+        let mut total = 0;
+        for _ in 0..VALIDATION_SIZE {
+            let index = self.validation_data.get_random_index();
+            let input = self.validation_data.get_input(index).as_vec();
+            let output = self.validation_data.get_output(index);
+            let g = self.guess(&input);
+            if g == output.get_solution() as usize {
+                correct += 1;
+            }
+            total += 1;
+        }
+        (correct as f32) / (total as f32)
     }
 
     fn calculate_layer(&mut self, layer: usize) {
@@ -352,7 +355,8 @@ impl NN {
         let mut result = Matrix::new(r, c);
         for x in 0..r {
             for y in 0..c {
-                result.set(x, y, self.sigmoid_derivative(layer.get(x, y).unwrap())).unwrap();
+                let v = self.sigmoid_derivative(layer.get_unchecked(x, y));
+                result.set_unchecked(x, y, v);
             }
         }
         result
