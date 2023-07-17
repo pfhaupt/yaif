@@ -980,7 +980,7 @@ mod tests {
     }
     
     #[test]
-    fn test_matrix_matrix_addition() {
+    fn test_matrix_matrix_addition_square() {
         let cl_struct = initialize();
 
         let mut bfr1 = cl_struct.create_buffer(SIZE, SIZE);
@@ -1011,7 +1011,40 @@ mod tests {
     }
 
     #[test]
-    fn test_matrix_matrix_subtraction() {
+    fn test_matrix_matrix_addition_arbitrary() {
+        let cl_struct = initialize();
+
+        let m = 12908;
+        let n = 1290;
+
+        let mut bfr1 = cl_struct.create_buffer(m, n);
+        assert!(bfr1.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let mut bfr2 = cl_struct.create_buffer(m, n);
+        assert!(bfr2.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let mut bfr3 = cl_struct.create_buffer(m, n);
+        assert!(bfr3.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let f1 = cl_struct.fill_scalar(&bfr1, m * n, V1);
+        assert!(f1.is_ok(), "fill_scalar() did not work properly: {:?}", f1.err().unwrap());
+
+        let f2 = cl_struct.fill_scalar(&bfr2, m * n, V2);
+        assert!(f2.is_ok(), "fill_scalar() did not work properly: {:?}", f2.err().unwrap());
+
+        let r = cl_struct.matrix_add(&mut bfr1, &mut bfr2, &mut bfr3, m, n);
+        assert!(r.is_ok(), "matrix_add() did not work properly: {:?}", r.err().unwrap());
+
+        let c = cl_struct.read_buffer(&bfr3, m * n);
+        assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
+        let c = c.unwrap();
+        
+        let r = c.iter().map(|f| *f as usize).sum::<usize>();
+        let a = (V1 + V2) as usize * m * n;
+        assert_eq!(r, a, "matrix_add() did not work properly");
+    }
+    #[test]
+    fn test_matrix_matrix_subtraction_square() {
         let cl_struct = initialize();
 
         let mut bfr1 = cl_struct.create_buffer(SIZE, SIZE);
@@ -1038,6 +1071,40 @@ mod tests {
         
         let r = c.iter().map(|f| *f as usize).sum::<usize>();
         let a = (V1 - V2) as usize * BUFFER_SIZE;
+        assert_eq!(r, a, "matrix_sub() did not work properly");
+    }
+
+    #[test]
+    fn test_matrix_matrix_subtraction_arbitrary() {
+        let cl_struct = initialize();
+
+        let m = 12908;
+        let n = 1290;
+
+        let mut bfr1 = cl_struct.create_buffer(m, n);
+        assert!(bfr1.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let mut bfr2 = cl_struct.create_buffer(m, n);
+        assert!(bfr2.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let mut bfr3 = cl_struct.create_buffer(m, n);
+        assert!(bfr3.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let f1 = cl_struct.fill_scalar(&bfr1, m * n, V1);
+        assert!(f1.is_ok(), "fill_scalar() did not work properly: {:?}", f1.err().unwrap());
+
+        let f2 = cl_struct.fill_scalar(&bfr2, m * n, V2);
+        assert!(f2.is_ok(), "fill_scalar() did not work properly: {:?}", f2.err().unwrap());
+
+        let r = cl_struct.matrix_sub(&mut bfr1, &mut bfr2, &mut bfr3, m, n);
+        assert!(r.is_ok(), "matrix_sub() did not work properly: {:?}", r.err().unwrap());
+
+        let c = cl_struct.read_buffer(&bfr3, m * n);
+        assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
+        let c = c.unwrap();
+        
+        let r = c.iter().map(|f| *f as usize).sum::<usize>();
+        let a = (V1 - V2) as usize * m * n;
         assert_eq!(r, a, "matrix_sub() did not work properly");
     }
 
@@ -1114,7 +1181,7 @@ mod tests {
     }
     
     #[test]
-    fn test_matrix_matrix_addition_inline() {
+    fn test_matrix_matrix_inline_addition_square() {
         let cl_struct = initialize();
 
         let mut bfr1 = cl_struct.create_buffer(SIZE, SIZE);
@@ -1138,6 +1205,37 @@ mod tests {
 
         let r = c.iter().map(|f| *f as usize).sum::<usize>();
         let a = (V1 + V2) as usize * BUFFER_SIZE;
+        assert_eq!(r, a, "matrix_add() did not work properly");
+    }
+
+    #[test]
+    fn test_matrix_matrix_inline_addition_arbitrary() {
+        let cl_struct = initialize();
+
+        let m = 1290;
+        let n = 8192;
+
+        let mut bfr1 = cl_struct.create_buffer(m, n);
+        assert!(bfr1.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let mut bfr2 = cl_struct.create_buffer(m, n);
+        assert!(bfr2.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let f1 = cl_struct.fill_scalar(&bfr1, m * n, V1);
+        assert!(f1.is_ok(), "fill_scalar() did not work properly: {:?}", f1.err().unwrap());
+
+        let f2 = cl_struct.fill_scalar(&bfr2, m * n, V2);
+        assert!(f2.is_ok(), "fill_scalar() did not work properly: {:?}", f2.err().unwrap());
+
+        let r = cl_struct.matrix_add_inline(&mut bfr1, &mut bfr2, m, n);
+        assert!(r.is_ok(), "matrix_add() did not work properly: {:?}", r.err().unwrap());
+
+        let c = cl_struct.read_buffer(&bfr1, m * n);
+        assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
+        let c = c.unwrap();
+
+        let r = c.iter().map(|f| *f as usize).sum::<usize>();
+        let a = (V1 + V2) as usize * m * n;
         assert_eq!(r, a, "matrix_add() did not work properly");
     }
      
