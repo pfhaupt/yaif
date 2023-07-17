@@ -9,7 +9,7 @@ use opencl3::Result;
 
 const MMUL_VERSION: usize = 3;
 
-pub const TS: usize = 32;
+const TS: usize = 32;
 
 const WPT: usize = 4;
 const RTS: usize = TS / WPT;
@@ -25,8 +25,8 @@ const LPTA: usize = (TSK * TSM) / (RTSM * RTSN);
 const LPTB: usize = (TSK * TSN) / (RTSM * RTSN);
 
 
-pub const ADD_MATRIX_NAME: &str = "matrix_add";
-pub const ADD_MATRIX_SOURCE: &str = r#"
+const ADD_MATRIX_NAME: &str = "matrix_add";
+const ADD_MATRIX_SOURCE: &str = r#"
 kernel void matrix_add(
     const int M,
     const int N,
@@ -41,8 +41,8 @@ kernel void matrix_add(
 }"#;
 
 
-pub const MUL_SCALAR_NAME: &str = "matrix_mul_scalar";
-pub const MUL_SCALAR_SOURCE: &str = r#"
+const MUL_SCALAR_NAME: &str = "matrix_mul_scalar";
+const MUL_SCALAR_SOURCE: &str = r#"
 kernel void matrix_mul_scalar(
     const int M,
     const int N,
@@ -56,8 +56,8 @@ kernel void matrix_mul_scalar(
 }"#;
 
 // Thanks a lot to https://cnugteren.github.io/tutorial/pages/page1.html for the awesome tutorial.
-pub const MUL_MATRIX_NAME: &str = "matrix_mul_matrix";
-pub const MUL_MATRIX_SOURCE: &str =
+const MUL_MATRIX_NAME: &str = "matrix_mul_matrix";
+const MUL_MATRIX_SOURCE: &str =
 if MMUL_VERSION == 1 {
 r#"
 kernel void matrix_mul_matrix(
@@ -258,7 +258,7 @@ kernel void matrix_mul_matrix(
 };
 
 
-pub fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, k: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
+fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, k: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
     let mut exec_kernel = ExecuteKernel::new(&kernel);
     let event = exec_kernel
         .set_arg(&(m as u32))
@@ -302,7 +302,7 @@ pub fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n:
     Ok(result)
 }
 
-pub fn get_madd_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
+fn get_madd_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
     ExecuteKernel::new(&kernel)
         .set_arg(&(m as u32))
         .set_arg(&(n as u32))
@@ -314,7 +314,7 @@ pub fn get_madd_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n:
         .enqueue_nd_range(&queue)
 }
 
-pub fn get_smul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, scalar: f32) -> Result<Event> {
+fn get_smul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, scalar: f32) -> Result<Event> {
     ExecuteKernel::new(&kernel)
         .set_arg(&(m as u32))
         .set_arg(&(n as u32))
