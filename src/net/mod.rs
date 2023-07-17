@@ -5,7 +5,6 @@ pub mod cl_net;
 
 pub trait NetTrait {
     fn initialize_layers(&mut self, layer_sizes: Vec<usize>);
-    fn initialize_network(&mut self);
     fn initialize_training_data(&mut self, data: &DataSet);
     fn initialize_validation_data(&mut self, data: &DataSet);
 

@@ -102,45 +102,6 @@ impl NetTrait for NN {
         self.floating_average = 0.0;
     }
 
-    fn initialize_network(&mut self) {
-        for i in 0..self.layer_count {
-            let len = self.layer_lengths[i];
-
-            self.layers[i] = Matrix::new(len, 1);
-            self.transposed_layers[i] = Matrix::new(1, len);
-            self.errors[i] = Matrix::new(len, 1);
-            self.pre_activation[i] = Matrix::new(len, 1);
-        }
-
-        self.weights[0] = Matrix::new(0, 0);
-        self.transposed_weights[0] = Matrix::new(0, 0);
-        self.bias[0] = Matrix::new(0, 0);
-        self.errors[0] = Matrix::new(0, 0);
-
-        for i in 1..self.layer_count {
-            let prev_len = self.layer_lengths[i - 1];
-            let curr_len = self.layer_lengths[i];
-
-            self.weights[i] = Matrix::new(curr_len, prev_len);
-            self.transposed_weights[i] = Matrix::new(prev_len, curr_len);
-
-            let two_over_input_count = 2.0 / (prev_len as f32);
-            self.weights[i].gaussian_fill(0.0, two_over_input_count);
-
-            self.bias[i] = Matrix::new(curr_len, 1);
-            self.bias[i].fill(0.1);
-        }
-
-        for i in 0..self.layer_count {
-            let (b_row, b_col) = self.bias[i].get_dim();
-            let (w_row, w_col) = self.weights[i].get_dim();
-
-            self.avg_bias[i] = Matrix::new(b_row, b_col);
-            self.avg_weight[i] = Matrix::new(w_row, w_col);
-            self.weight_gradient[i] = Matrix::new(w_row, w_col);
-        }
-    }
-
     fn initialize_training_data(&mut self, data: &DataSet) {
         self.training_data = data.clone();
         self.initialize_validation_data(data);
@@ -283,6 +244,47 @@ impl NN {
             result.initialize_network();
             // println!("Initialized a Neural Network!\n{:?}", result);
             Ok(result)
+        }
+    }
+
+    
+
+    fn initialize_network(&mut self) {
+        for i in 0..self.layer_count {
+            let len = self.layer_lengths[i];
+
+            self.layers[i] = Matrix::new(len, 1);
+            self.transposed_layers[i] = Matrix::new(1, len);
+            self.errors[i] = Matrix::new(len, 1);
+            self.pre_activation[i] = Matrix::new(len, 1);
+        }
+
+        self.weights[0] = Matrix::new(0, 0);
+        self.transposed_weights[0] = Matrix::new(0, 0);
+        self.bias[0] = Matrix::new(0, 0);
+        self.errors[0] = Matrix::new(0, 0);
+
+        for i in 1..self.layer_count {
+            let prev_len = self.layer_lengths[i - 1];
+            let curr_len = self.layer_lengths[i];
+
+            self.weights[i] = Matrix::new(curr_len, prev_len);
+            self.transposed_weights[i] = Matrix::new(prev_len, curr_len);
+
+            let two_over_input_count = 2.0 / (prev_len as f32);
+            self.weights[i].gaussian_fill(0.0, two_over_input_count);
+
+            self.bias[i] = Matrix::new(curr_len, 1);
+            self.bias[i].fill(0.1);
+        }
+
+        for i in 0..self.layer_count {
+            let (b_row, b_col) = self.bias[i].get_dim();
+            let (w_row, w_col) = self.weights[i].get_dim();
+
+            self.avg_bias[i] = Matrix::new(b_row, b_col);
+            self.avg_weight[i] = Matrix::new(w_row, w_col);
+            self.weight_gradient[i] = Matrix::new(w_row, w_col);
         }
     }
 

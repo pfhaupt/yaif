@@ -1,6 +1,6 @@
 use crate::{cl_kernel::ClStruct, data_set::DataSet};
 
-use opencl3::memory::Buffer;
+use opencl3::{memory::Buffer, error_codes::ClError};
 
 use super::NetTrait;
 
@@ -99,19 +99,17 @@ impl NetTrait for ClNet {
         self.weight_gradient = vec![];
         for _ in 0..self.layer_count { self.weight_gradient.push(None); }
 
-        self.target_vector = Some(self.cl_struct.create_buffer(self.layer_lengths[self.last_layer], 1));
-        self.current_cost = Some(self.cl_struct.create_buffer(self.layer_lengths[self.last_layer], 1));
+        self.target_vector = self.cl_struct.create_buffer(self.layer_lengths[self.last_layer], 1);
+        self.current_cost = self.cl_struct.create_buffer(self.layer_lengths[self.last_layer], 1);
         self.floating_average = 0.0;
     }
 
-    fn initialize_network(&mut self) {
-        todo!()
-    }
     fn initialize_training_data(&mut self, data: &DataSet) {
-        todo!()
+        self.training_data = data.clone();
     }
+
     fn initialize_validation_data(&mut self, data: &DataSet) {
-        todo!()
+        self.validation_data = data.clone();
     }
 
     fn is_finished(&mut self) -> bool {
@@ -159,20 +157,73 @@ impl ClNet {
             Err("Network has no layers.")
         } else {
             let mut result: ClNet = Default::default();
+            result.set_cl_struct(cl_struct);
+            result.load_kernels();
             result.initialize_layers(layer_sizes);
-            result.initialize_network();
-            // result.set_cl_struct(cl_struct);
-            // result.load_kernels();
+            result.initialize_network()?;
             // println!("Initialized a Neural Network!\n{:?}", result);
             Ok(result)
         }
     }
+    
+    fn initialize_network(&mut self) -> Result<(), ClError> {
+        for i in 0..self.layer_count {
+            let len = self.layer_lengths[i];
+
+            self.layers[i] = self.cl_struct.create_buffer(len, 1);
+            self.errors[i] = self.cl_struct.create_buffer(len, 1);
+            self.pre_activation[i] = self.cl_struct.create_buffer(len, 1);
+
+            self.bias_gradient[i] = self.cl_struct.create_buffer(len, 1);
+        }
+
+        for i in 1..self.layer_count {
+            let prev_len = self.layer_lengths[i - 1];
+            let curr_len = self.layer_lengths[i];
+
+            self.weights[i] = self.cl_struct.create_buffer(curr_len, prev_len);
+
+            let two_over_input_count = 2.0 / (prev_len as f32);
+            self.fill_buffer_gauss(&self.weights[i], curr_len * prev_len, 0.0, two_over_input_count)?;
+
+            self.bias[i] = self.cl_struct.create_buffer(curr_len, 1);
+            self.fill_buffer(&self.bias[i], curr_len, 0.1)?;
+        }
+
+        for i in 1..self.layer_count {
+            let prev_len = self.layer_lengths[i - 1];
+            let curr_len = self.layer_lengths[i];
+            let r1 = self.cl_struct.read_buffer(&self.weights[i], prev_len * curr_len)?;
+            let r2 = self.cl_struct.read_buffer(&self.bias[i], curr_len)?;
+            println!("{:?}\n{:?}", r1, r2);
+        }
+
+        for i in 1..self.layer_count {
+            let prev_len = self.layer_lengths[i - 1];
+            let curr_len = self.layer_lengths[i];
+            let (b_row, b_col) = (curr_len, 1);
+            let (w_row, w_col) = (curr_len, prev_len);
+
+            self.avg_bias[i] = self.cl_struct.create_buffer(b_row, b_col);
+            self.avg_weight[i] = self.cl_struct.create_buffer(w_row, w_col);
+            self.weight_gradient[i] = self.cl_struct.create_buffer(w_row, w_col);
+        }
+        Ok(())
+    }
 
     fn load_kernels(&mut self) {
-        todo!()
+        self.cl_struct.load_kernels();
     }
 
     fn set_cl_struct(&mut self, cl_struct: ClStruct) {
         self.cl_struct = cl_struct
+    }
+
+    fn fill_buffer(&self, buffer: &Option<Buffer<f32>>, size: usize, val: f32) -> Result<(), ClError> {
+        self.cl_struct.fill(buffer, size, val)
+    }
+
+    fn fill_buffer_gauss(&self, buffer: &Option<Buffer<f32>>, size: usize, mean: f32, variance: f32) -> Result<(), ClError> {
+        self.cl_struct.fill_gauss(buffer, size, mean, variance)
     }
 }

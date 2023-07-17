@@ -10,9 +10,10 @@ use opencl3::memory::{Buffer, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE, CL_MEM_WRITE_
 use opencl3::program::Program;
 use opencl3::types::{cl_event, cl_float, CL_BLOCKING};
 use opencl3::Result;
+use std::collections::HashMap;
 use std::ptr;
 
-use crate::net::cl_net::ClNet;
+use rand_distr::{Normal, Distribution};
 
 
 const MMUL_VERSION: usize = 3;
@@ -62,6 +63,7 @@ kernel void matrix_mul_scalar(
     const int i = globalCol * M + globalRow;
     x[i] = x[i] * y;
 }"#;
+
 
 // Thanks a lot to https://cnugteren.github.io/tutorial/pages/page1.html for the awesome tutorial.
 const MUL_MATRIX_NAME: &str = "matrix_mul_matrix";
@@ -265,6 +267,38 @@ kernel void matrix_mul_matrix(
     ""
 };
 
+const FILL_MATRIX_NAME: &str = "matrix_fill";
+const FILL_MATRIX_SOURCE: &str =
+r#"
+kernel void matrix_fill(
+    const int M,
+    global float* x,
+    float y)
+{
+    const int i = get_global_id(0);
+    if (i < M) x[i] = y;
+}
+"#;
+
+const FILL_GAUSS_NAME: &str = "matrix_gauss";
+const FILL_GAUSS_SOURCE: &str =
+r#"
+kernel void matrix_gauss(
+    const int M,
+    global float* x,
+    global float* gauss)
+{
+    const int i = get_global_id(0);
+    if (i < M) x[i] = gauss[i];
+}
+"#;
+
+const IMPLEMENTED_KERNELS: [&str; 5] = [
+    ADD_MATRIX_NAME,
+    MUL_MATRIX_NAME,
+    MUL_SCALAR_NAME,
+    FILL_MATRIX_NAME,
+    FILL_GAUSS_NAME];
 
 fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, k: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
     let mut exec_kernel = ExecuteKernel::new(&kernel);
@@ -333,10 +367,30 @@ fn get_smul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usi
         .enqueue_nd_range(&queue)
 }
 
+fn get_fill_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, size: usize, a: &Buffer<f32>, scalar: f32) -> Result<Event> {
+    ExecuteKernel::new(&kernel)
+        .set_arg(&(m as u32))
+        .set_arg(a)
+        .set_arg(&scalar)
+        .set_global_work_sizes(&[size, 1, 1])
+        .set_local_work_sizes(&[TS, 1, 1])
+        .enqueue_nd_range(&queue)
+}
+
+fn get_gauss_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, size: usize, a: &Buffer<f32>, gauss: &Buffer<f32>) -> Result<Event> {
+    ExecuteKernel::new(&kernel)
+        .set_arg(&(m as u32))
+        .set_arg(a)
+        .set_arg(gauss)
+        .set_global_work_sizes(&[size, 1, 1])
+        .set_local_work_sizes(&[TS, 1, 1])
+        .enqueue_nd_range(&queue)
+}
 pub struct ClStruct {
     device: Device,
     context: Context,
-    queue: CommandQueue
+    queue: CommandQueue,
+    kernels: HashMap<String, Kernel>
 }
 
 impl ClStruct {
@@ -348,7 +402,8 @@ impl ClStruct {
         let context = Context::from_device(&device).expect("Context::from_device failed");
         let queue = CommandQueue::create_with_properties(&context, device_id, CL_QUEUE_PROFILING_ENABLE, 0)
             .expect("CommandQueue::create_default failed");
-        Ok( Self { device, context, queue } )
+        let kernels = HashMap::new();
+        Ok( Self { device, context, queue, kernels } )
     }
 
     pub fn load_program(&self, source: &str) -> Program {
@@ -360,15 +415,98 @@ impl ClStruct {
         Kernel::create(program, kernel_name).expect("Kernel::create failed")
     }
 
-    pub fn load_kernels(&self, cl_net: &mut ClNet) {
-        todo!()
+    pub fn load_kernels(&mut self) {
+        assert!(IMPLEMENTED_KERNELS.len() == 5, "Can not load all kernels yet");
+
+        let add_prog = self.load_program(ADD_MATRIX_SOURCE);
+        let add_kernel = self.load_kernel(&add_prog, ADD_MATRIX_NAME);
+        self.kernels.insert(String::from(ADD_MATRIX_NAME), add_kernel);
+
+        let smul_prog = self.load_program(MUL_SCALAR_SOURCE);
+        let smul_kernel = self.load_kernel(&smul_prog, MUL_SCALAR_NAME);
+        self.kernels.insert(String::from(MUL_SCALAR_NAME), smul_kernel);
+
+        let mmul_prog = self.load_program(MUL_MATRIX_SOURCE);
+        let mmul_kernel = self.load_kernel(&mmul_prog, MUL_MATRIX_NAME);
+        self.kernels.insert(String::from(MUL_MATRIX_NAME), mmul_kernel);
+
+        let fill_prog = self.load_program(FILL_MATRIX_SOURCE);
+        let fill_kernel = self.load_kernel(&fill_prog, FILL_MATRIX_NAME);
+        self.kernels.insert(String::from(FILL_MATRIX_NAME), fill_kernel);
+        
+        let gauss_prog = self.load_program(FILL_GAUSS_SOURCE);
+        let gauss_kernel = self.load_kernel(&gauss_prog, FILL_GAUSS_NAME);
+        self.kernels.insert(String::from(FILL_GAUSS_NAME), gauss_kernel);
     }
 
-    pub fn create_buffer(&self, rows: usize, cols: usize) -> Buffer<f32> {
-        let b = Buffer::<cl_float>::create(&self.context, CL_MEM_READ_ONLY, rows * cols, ptr::null_mut());
+    pub fn create_buffer(&self, rows: usize, cols: usize) -> Option<Buffer<f32>> {
+        let b = Buffer::<cl_float>::create(&self.context, CL_MEM_READ_WRITE, rows * cols, ptr::null_mut());
         match b {
-            Ok(bfr) => bfr,
+            Ok(bfr) => Some(bfr),
             Err(e) => panic!("Error when creating OpenCL buffer! {}", e)
+        }
+    }
+
+    pub fn read_buffer(&self, buffer: &Option<Buffer<f32>>, size: usize) -> Result<Vec<f32>> {
+        match buffer {
+            None => {
+                Err(ClError(-61))
+            },
+            Some(bfr) => {
+                let mut r1 = vec![0.0; size];
+                let read_event = self.queue.enqueue_read_buffer(bfr, CL_BLOCKING, 0, &mut r1, &vec![])?;
+                read_event.wait()?;
+                Ok(r1)
+            }
+        }
+    }
+
+    pub fn fill(&self, buffer: &Option<Buffer<f32>>, size: usize, val: f32) -> Result<()> {
+        match self.kernels.get(&String::from(FILL_MATRIX_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(k) => {
+                match buffer {
+                    None => Err(ClError(-61)),
+                    Some(bfr) => {
+                        let new_size = if size % 32 != 0 { (size / 32 + 1) * 32 } else { size };
+                        let fill_event = get_fill_kernel_event(k,
+                            &self.queue,
+                            size,
+                            new_size,
+                        &bfr,
+                            val)?;
+                            let mut events: Vec<cl_event> = Vec::default();
+                            events.push(fill_event.get());
+                            Ok(())
+                        }
+                }
+            }
+        }
+    }
+
+    pub fn fill_gauss(&self, buffer: &Option<Buffer<f32>>, size: usize, mean: f32, variance: f32) -> Result<()> {
+        match self.kernels.get(&String::from(FILL_GAUSS_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(k) => {
+                match buffer {
+                    None => Err(ClError(-61)),
+                    Some(bfr) => {
+                        let new_size = if size % 32 != 0 { (size / 32 + 1) * 32 } else { size };
+                        
+                        let mut r = vec![0.0; new_size];
+                        let normal = Normal::new(mean, variance).unwrap();
+                        for i in 0..new_size { r[i] = normal.sample(&mut rand::thread_rng()); }
+                        let mut gauss_bfr = self.create_buffer(new_size, 1).ok_or(ClError(-61))?;
+                        let _x_write_event = self.queue.enqueue_write_buffer(&mut gauss_bfr, CL_BLOCKING, 0, &r, &[])?;
+            
+                        let fill_event = get_gauss_kernel_event(k,
+                            &self.queue, size, new_size, bfr, &gauss_bfr)?;
+                        let mut events: Vec<cl_event> = Vec::default();
+                        events.push(fill_event.get());
+                        Ok(())
+                    }
+                }
+            }
         }
     }
 }

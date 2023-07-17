@@ -3,5 +3,12 @@ use yaif::cl_kernel::ClStruct;
 
 fn main() {
     let cl_struct = ClStruct::new().unwrap();
-    let mut _cl_net = ClNet::new(cl_struct, vec![28, 28]);
+    match ClNet::new(cl_struct, vec![5, 5]) {
+        Ok(cl) => {
+            println!("Worked!!")
+        },
+        Err(e) => {
+            panic!("{}", e)
+        }
+    }
 }
