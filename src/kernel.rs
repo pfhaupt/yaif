@@ -47,7 +47,7 @@ kernel void matrix_mul_scalar(
     x[i] = x[i] * y;
 }"#;
 
-
+// Thanks a lot to https://cnugteren.github.io/tutorial/pages/page1.html for the awesome tutorial.
 pub const MUL_MATRIX_NAME: &str = "matrix_mul_matrix";
 pub const MUL_MATRIX_SOURCE: &str =
 if MMUL_VERSION == 1 {
@@ -83,45 +83,36 @@ kernel void matrix_mul_matrix(
     local float* Asub,
     local float* Bsub)
 {
-    const int row = get_local_id(0); // Local row ID (max: TS)
-    const int col = get_local_id(1); // Local col ID (max: TS)
-    const int globalRow = TS*get_group_id(0) + row; // Row ID of C (0..M)
-    const int globalCol = TS*get_group_id(1) + col; // Col ID of C (0..N)
+    const int row = get_local_id(0);
+    const int col = get_local_id(1);
+    const int globalRow = TS * get_group_id(0) + row;
+    const int globalCol = TS * get_group_id(1) + col;
 
-    // Initialise the accumulation register
     float acc = 0.0f;
     
-    // Loop over all tiles
     const int numTiles = K/TS;
-    for (int t=0; t<numTiles; t++) {
+    for (int t = 0; t < numTiles; t++) {
+        const int tiledRow = TS * t + row;
+        const int tiledCol = TS * t + col;
+        Asub[col * TS + row] = A[tiledCol * M + globalRow];
+        Bsub[col * TS + row] = B[globalCol * K + tiledRow];
 
-        // Load one tile of A and B into local memory
-        const int tiledRow = TS*t + row;
-        const int tiledCol = TS*t + col;
-        Asub[col * TS + row] = A[tiledCol*M + globalRow];
-        Bsub[col * TS + row] = B[globalCol*K + tiledRow];
-
-        // Synchronise to make sure the tile is loaded
         barrier(CLK_LOCAL_MEM_FENCE);
 
-        // Perform the computation for a single tile
         for (int k=0; k<TS; k++) {
             acc += Asub[k * TS + row] * Bsub[col * TS + k];
         }
 
-        // Synchronise before loading the next tile
         barrier(CLK_LOCAL_MEM_FENCE);
     }
-
-    // Store the final result in C
-    C[globalCol*M + globalRow] = acc;
+    C[globalCol * M + globalRow] = acc;
 }
 "#
 } else if MMUL_VERSION == 3 { // Version 3 (working)
 r#"
 #define TS 8
 #define WPT 4
-#define RTS (TS/WPT)
+#define RTS (TS / WPT)
 kernel void matrix_mul_matrix(
     const int M,
     const int N,
@@ -132,46 +123,36 @@ kernel void matrix_mul_matrix(
     local float* Asub,
     local float* Bsub)
 {
-    const int row = get_local_id(0); // Local row ID (max: TS)
-    const int col = get_local_id(1); // Local col ID (max: TS/WPT == RTS)
-    const int globalRow = TS*get_group_id(0) + row; // Row ID of C (0..M)
-    const int globalCol = TS*get_group_id(1) + col; // Col ID of C (0..N)
+    const int row = get_local_id(0);
+    const int col = get_local_id(1);
+    const int globalRow = TS * get_group_id(0) + row;
+    const int globalCol = TS * get_group_id(1) + col;
 
-    // Initialise the accumulation registers
     float acc[WPT];
-    for (int w=0; w<WPT; w++) {
+    for (int w = 0; w < WPT; w++) {
         acc[w] = 0.0f;
     }
 
-    // Loop over all tiles
-    const int numTiles = K/TS;
-    for (int t=0; t<numTiles; t++) {
-
-        // Load one tile of A and B into local memory
-        for (int w=0; w<WPT; w++) {
-            const int tiledRow = TS*t + row;
-            const int tiledCol = TS*t + col;
-            Asub[(col + w*RTS) * TS + row] = A[(tiledCol + w*RTS)*M + globalRow];
-            Bsub[(col + w*RTS) * TS + row] = B[(globalCol + w*RTS)*K + tiledRow];
+    const int numTiles = K / TS;
+    for (int t = 0; t < numTiles; t++) {
+        for (int w = 0; w < WPT; w++) {
+            const int tiledRow = TS * t + row;
+            const int tiledCol = TS * t + col;
+            Asub[(col + w * RTS) * TS + row] = A[(tiledCol + w * RTS) * M + globalRow];
+            Bsub[(col + w * RTS) * TS + row] = B[(globalCol + w * RTS) * K + tiledRow];
         }
-
-        // Synchronise to make sure the tile is loaded
         barrier(CLK_LOCAL_MEM_FENCE);
 
-        // Perform the computation for a single tile
-        for (int k=0; k<TS; k++) {
-            for (int w=0; w<WPT; w++) {
-                acc[w] += Asub[k * TS + row] * Bsub[(col + w*RTS) * TS + k];
+        for (int k = 0; k < TS; k++) {
+            for (int w = 0; w < WPT; w++) {
+                acc[w] += Asub[k * TS + row] * Bsub[(col + w * RTS) * TS + k];
             }
         }
-
-        // Synchronise before loading the next tile
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    // Store the final results in C
-    for (int w=0; w<WPT; w++) {
-        C[(globalCol + w*RTS)*M + globalRow] = acc[w];
+    for (int w = 0; w < WPT; w++) {
+        C[(globalCol + w * RTS) * M + globalRow] = acc[w];
     }
 }
 "#
@@ -181,16 +162,16 @@ r#"
 #define DIV2(x,y) ((x) / (y))
 #define TS 16
 #define WPT 4
-#define RTS (TS/WPT)
+#define RTS (TS / WPT)
 #define TSM 8
 #define TSN TSM
 #define TSK 8
 #define WPTM 4
 #define WPTN WPTM
-#define RTSM (TSM/WPTM)
-#define RTSN (TSN/WPTN)
-#define LPTA ((TSK*TSM)/(RTSM*RTSN))
-#define LPTB ((TSK*TSN)/(RTSM*RTSN))
+#define RTSM (TSM / WPTM)
+#define RTSN (TSN / WPTN)
+#define LPTA ((TSK * TSM)/(RTSM * RTSN))
+#define LPTB ((TSK * TSN)/(RTSM * RTSN))
 kernel void matrix_mul_matrix(
     const int M,
     const int N,
@@ -201,83 +182,65 @@ kernel void matrix_mul_matrix(
     local float* Asub,
     local float* Bsub)
 {
-    // Thread identifiers
-    const int tidm = get_local_id(0); // Local row ID (max: TSM/WPTM == RTSM)
-    const int tidn = get_local_id(1); // Local col ID (max: TSN/WPTN == RTSN)
-    const int offsetM = TSM*get_group_id(0); // Work-group offset
-    const int offsetN = TSN*get_group_id(1); // Work-group offset
+    const int tidm = get_local_id(0);
+    const int tidn = get_local_id(1);
+    const int offsetM = TSM * get_group_id(0);
+    const int offsetN = TSN * get_group_id(1);
 
-    // Allocate register space
     float Areg;
     float Breg[WPTN];
     float acc[WPTM][WPTN];
 
-    // Initialise the accumulation registers
     #pragma unroll
-    for (int wm=0; wm<WPTM; wm++) {
+    for (int wm=0; wm < WPTM; wm++) {
         #pragma unroll
-        for (int wn=0; wn<WPTN; wn++) {
+        for (int wn=0; wn < WPTN; wn++) {
             acc[wm][wn] = 0.0f;
         }
     }
 
-    // Loop over all tiles
     const int numTiles = K/TSK;
-    int t=0;
+    int t = 0;
     do {
-
-        // Load one tile of A and B into local memory
         #pragma unroll
-        for (int la=0; la<LPTA; la++) {
-            int tid = tidn*RTSM + tidm;
-            volatile int id = la*RTSN*RTSM + tid;
-            int row = MOD2(id,TSM);
-            int col = DIV2(id,TSM);
-            int tiledIndex = TSK*t + col;
-            Asub[col * TSK + row] = A[tiledIndex*M + offsetM + row];
-            Bsub[row * TSN + col] = B[tiledIndex*N + offsetN + row];
+        for (int la = 0; la < LPTA; la++) {
+            int tid = tidn * RTSM + tidm;
+            volatile int id = la * RTSN * RTSM + tid;
+            int row = MOD2(id, TSM);
+            int col = DIV2(id, TSM);
+            int tiledIndex = TSK * t + col;
+            Asub[col * TSK + row] = A[tiledIndex * M + offsetM + row];
+            Bsub[row * TSN + col] = B[tiledIndex * N + offsetN + row];
         }
-
-        // Synchronise to make sure the tile is loaded
         barrier(CLK_LOCAL_MEM_FENCE);
 
-        // Loop over the values of a single tile
-        for (int k=0; k<TSK; k++) {
-
-            // Cache the values of Bsub in registers
+        for (int k = 0; k < TSK; k++) {
             #pragma unroll
-            for (int wn=0; wn<WPTN; wn++) {
-                int col = tidn + wn*RTSN;
+            for (int wn = 0; wn < WPTN; wn++) {
+                int col = tidn + wn * RTSN;
                 Breg[wn] = Bsub[col * TSN + k];
             }
-
-            // Perform the computation
             #pragma unroll
-            for (int wm=0; wm<WPTM; wm++) {
-                int row = tidm + wm*RTSM;
+            for (int wm = 0; wm < WPTM; wm++) {
+                int row = tidm + wm * RTSM;
                 Areg = Asub[k * TSK + row];
                 #pragma unroll
-                for (int wn=0; wn<WPTN; wn++) {
+                for (int wn = 0; wn < WPTN; wn++) {
                     acc[wm][wn] += Areg * Breg[wn];
                 }
             }
         }
-
-        // Synchronise before loading the next tile
         barrier(CLK_LOCAL_MEM_FENCE);
-
-        // Next tile
         t++;
-    } while (t<numTiles);
+    } while (t < numTiles);
 
-    // Store the final results in C
     #pragma unroll
-    for (int wm=0; wm<WPTM; wm++) {
-        int globalRow = offsetM + tidm + wm*RTSM;
+    for (int wm = 0; wm < WPTM; wm++) {
+        int globalRow = offsetM + tidm + wm * RTSM;
         #pragma unroll
-        for (int wn=0; wn<WPTN; wn++) {
-            int globalCol = offsetN + tidn + wn*RTSN;
-            C[globalCol*M + globalRow] = acc[wm][wn];
+        for (int wn = 0; wn < WPTN; wn++) {
+            int globalCol = offsetN + tidn + wn * RTSN;
+            C[globalCol * M + globalRow] = acc[wm][wn];
         }
     }
 }
