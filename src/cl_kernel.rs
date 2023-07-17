@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, unreachable_code)]
 
 use opencl3::event::Event;
 use opencl3::command_queue::CommandQueue;
@@ -25,8 +25,8 @@ const LPTA: usize = (TSK * TSM) / (RTSM * RTSN);
 const LPTB: usize = (TSK * TSN) / (RTSM * RTSN);
 
 
-pub const ADD_NAME: &str = "matrix_add";
-pub const ADD_SOURCE: &str = r#"
+pub const ADD_MATRIX_NAME: &str = "matrix_add";
+pub const ADD_MATRIX_SOURCE: &str = r#"
 kernel void matrix_add(
     const int M,
     const int N,
@@ -258,7 +258,6 @@ kernel void matrix_mul_matrix(
 };
 
 
-
 pub fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, k: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
     let mut exec_kernel = ExecuteKernel::new(&kernel);
     let event = exec_kernel
@@ -289,6 +288,7 @@ pub fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n:
                 .enqueue_nd_range(&queue)?
         },
         4 => {
+            todo!("Find out what broke Version 4 of MMM.");
             event.set_arg_local_buffer(TSK * TSM * 4)
                 .set_arg_local_buffer(TSN * (TSK + 2) * 4)
                 .set_global_work_sizes(&[m / WPTM, n / WPTN, 1])
@@ -323,4 +323,184 @@ pub fn get_smul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n:
         .set_global_work_sizes(&[m, n, 1])
         .set_local_work_sizes(&[TS, TS, 1])
         .enqueue_nd_range(&queue)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::matrix::Matrix;
+    use crate::cl_kernel::*;
+    
+    use opencl3::command_queue::{CommandQueue, CL_QUEUE_PROFILING_ENABLE};
+    use opencl3::context::Context;
+    use opencl3::device::{get_all_devices, Device, CL_DEVICE_TYPE_GPU};
+    use opencl3::kernel::Kernel;
+    use opencl3::memory::{Buffer, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE, CL_MEM_WRITE_ONLY};
+    use opencl3::program::Program;
+    use opencl3::types::{cl_event, cl_float, CL_BLOCKING};
+    use opencl3::Result;
+    use std::ptr;
+
+    use rand::Rng;
+
+    const TESTS: usize = 5;
+    const SIZE: usize = 1_000;
+    const WORST_CASE: usize = SIZE * SIZE;
+
+    fn init(name: &str, source: &str) -> Result<(Device, Context, CommandQueue, Program, Kernel)> {
+        let device_id = *get_all_devices(CL_DEVICE_TYPE_GPU)?
+            .first()
+            .expect("no device found in platform");
+        let device = Device::new(device_id);
+        let context = Context::from_device(&device).expect("Context::from_device failed");
+        let queue = CommandQueue::create_with_properties(&context, device_id, CL_QUEUE_PROFILING_ENABLE, 0)
+            .expect("CommandQueue::create_default failed");
+        
+        let program = Program::create_and_build_from_source(&context, source, "")
+            .expect("Program::create_and_build_from_source failed");
+
+        let kernel = Kernel::create(&program, name).expect("Kernel::create failed");
+        Ok((device, context, queue, program, kernel))
+    }
+
+    #[test]
+    fn test_mat_mat_mul() -> Result<()> {
+        let (_, context, queue, _, kernel) = init(MUL_MATRIX_NAME, MUL_MATRIX_SOURCE)?;
+        
+        let mut a = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
+        let mut b = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
+        let c = Buffer::<cl_float>::create(&context, CL_MEM_READ_WRITE, WORST_CASE, ptr::null_mut())?;
+        
+        for _ in 0..TESTS {
+            let (m, n, k) = 
+                (rand::thread_rng().gen_range(10..SIZE),
+                rand::thread_rng().gen_range(10..SIZE),
+                rand::thread_rng().gen_range(10..SIZE));
+    
+            let mut m1 = Matrix::new(m, k);
+            m1.fill(1.0);
+            let mut m2 = Matrix::new(k, n);
+            m2.fill(1.0);
+    
+            let check_m1 = m1.clone();
+            let check_m2 = m2.clone();
+    
+            let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+            let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+            let new_k = if k % 32 != 0 { (k / 32 + 1) * 32 } else { k };
+    
+            m1.pad(new_m - m, new_k - k);
+            m2.pad(new_k - k, new_n - n);
+    
+            let _a_write_event = queue.enqueue_write_buffer(&mut a, CL_BLOCKING, 0, &m2.get_all(), &[])?;
+            let _b_write_event = queue.enqueue_write_buffer(&mut b, CL_BLOCKING, 0, &m1.get_all(), &[])?;
+            
+            let kernel_event = get_mmul_kernel_event(&kernel, &queue, new_n, new_m, new_k, &a, &b, &c)?;
+            
+            let mut events: Vec<cl_event> = Vec::default();
+            events.push(kernel_event.get());
+    
+            let mut r1 = vec![0.0; WORST_CASE];
+            
+            let read_event = queue.enqueue_read_buffer(&c, CL_BLOCKING, 0, &mut r1, &events)?;
+            read_event.wait()?;
+            
+            let mut r = Matrix::new(m, n);
+            r.fill_fit(&r1, new_n);
+    
+            assert_eq!(r, check_m1.multiply(&check_m2).unwrap(), "OpenCL Matrix Matrix Multiplication is not working properly!");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_mat_scalar_mul() -> Result<()> {
+        let (_, context, queue, _, kernel) = init(MUL_SCALAR_NAME, MUL_SCALAR_SOURCE)?;
+        
+        let mut x = Buffer::<cl_float>::create(&context, CL_MEM_READ_WRITE, WORST_CASE, ptr::null_mut())?;
+
+        for _ in 0..TESTS {
+            let (m, n) =
+                (rand::thread_rng().gen_range(10..SIZE),
+                rand::thread_rng().gen_range(10..SIZE));
+
+            let mut m1 = Matrix::new(m, n);
+            m1.fill(2.0);
+            
+            let mut check_m1 = m1.clone();
+            
+            let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+            let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+            
+            m1.pad(new_m - m, new_n - n);
+
+            let scalar: cl_float = rand::thread_rng().gen_range(0..10) as f32;
+            
+            let _x_write_event = queue.enqueue_write_buffer(&mut x, CL_BLOCKING, 0, &m1.get_all(), &[])?;
+            
+            let kernel_event = get_smul_kernel_event(&kernel, &queue, new_m, new_n, &x, scalar)?;
+            
+            let mut events: Vec<cl_event> = Vec::default();
+            events.push(kernel_event.get());
+
+            let mut r1 = vec![0.0; WORST_CASE];
+            
+            let read_event = queue.enqueue_read_buffer(&x, CL_BLOCKING, 0, &mut r1, &events)?;
+            read_event.wait()?;
+            let mut r = Matrix::new(m, n);
+            r.fill_fit(&r1, new_n);
+
+            check_m1.multiply_scalar(scalar);
+            assert_eq!(r, check_m1, "OpenCL Matrix Scalar Multiplication is not working properly!");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_mat_mat_add() -> Result<()> {
+        let (_, context, queue, _, kernel) = init(ADD_MATRIX_NAME, ADD_MATRIX_SOURCE)?;
+
+        let mut a = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
+        let mut b = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
+        let c = Buffer::<cl_float>::create(&context, CL_MEM_WRITE_ONLY, WORST_CASE, ptr::null_mut())?;
+
+        for _ in 0..TESTS {
+            let (m, n) = 
+                (rand::thread_rng().gen_range(10..SIZE),
+                rand::thread_rng().gen_range(10..SIZE));
+
+            let mut m1 = Matrix::new(m, n);
+            m1.fill(2.0);
+            let mut m2 = Matrix::new(m, n);
+            m2.fill(3.0);
+
+            let check_m1 = m1.clone();
+            let check_m2 = m2.clone();
+
+            let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+            let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+
+            m1.pad(new_m - m, new_n - n);
+            m2.pad(new_m - m, new_n - n);
+            
+            let _x_write_event = queue.enqueue_write_buffer(&mut a, CL_BLOCKING, 0, &m1.get_all(), &[])?;
+            let _y_write_event = queue.enqueue_write_buffer(&mut b, CL_BLOCKING, 0, &m2.get_all(), &[])?;
+            
+            let kernel_event = get_madd_kernel_event(&kernel, &queue, new_m, new_n, &a, &b, &c)?;
+            
+            let mut events: Vec<cl_event> = Vec::default();
+            events.push(kernel_event.get());
+
+            let mut r1 = vec![0.0; WORST_CASE];
+            
+            let read_event = queue.enqueue_read_buffer(&c, CL_BLOCKING, 0, &mut r1, &events)?;
+            read_event.wait()?;
+
+            let mut r = Matrix::new(m, n);
+            r.fill_fit(&r1, new_n);
+
+            assert_eq!(r, check_m1.add(&check_m2).unwrap(), "OpenCL Matrix Matrix Addition is not working properly!");
+        }
+        Ok(())
+    }
 }
