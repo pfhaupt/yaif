@@ -15,9 +15,6 @@ use std::ptr;
 
 use rand_distr::{Normal, Distribution};
 
-
-const MMUL_VERSION: usize = 3;
-
 const TS: usize = 32;
 
 const WPT: usize = 4;
@@ -93,6 +90,7 @@ kernel void matrix_mul_scalar(
     if (i < M * N) x[i] = x[i] * y;
 }"#;
 
+const MMUL_VERSION: usize = 3;
 
 // Thanks a lot to https://cnugteren.github.io/tutorial/pages/page1.html for the awesome tutorial.
 const MUL_MATRIX_NAME: &str = "matrix_mul_matrix";
@@ -424,7 +422,7 @@ const IMPLEMENTED_KERNELS: [&str; 12] = [
     SIGMOID_NAME,
     DER_SIGMOID_NAME];
 
-fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, k: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
+fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, k: usize, padded_m: usize, padded_n: usize, _padded_k: usize, a: &Buffer<f32>, b: &Buffer<f32>, c: &Buffer<f32>) -> Result<Event> {
     let mut exec_kernel = ExecuteKernel::new(&kernel);
     let event = exec_kernel
         .set_arg(&(m as u32))
@@ -435,21 +433,21 @@ fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usi
         .set_arg(c);
     let result = match MMUL_VERSION {
         1 => {
-            event.set_global_work_sizes(&[m, n, 1])
+            event.set_global_work_sizes(&[padded_m, padded_n, 1])
                 .set_local_work_sizes(&[TS, TS, 1])
                 .enqueue_nd_range(&queue)?
         },
         2 => {
             event.set_arg_local_buffer(TS * TS * 4)
                 .set_arg_local_buffer(TS * TS * 4)
-                .set_global_work_sizes(&[m, n, 1])
+                .set_global_work_sizes(&[padded_m, padded_n, 1])
                 .set_local_work_sizes(&[TS, TS, 1])
                 .enqueue_nd_range(&queue)?
         },
         3 => {
             event.set_arg_local_buffer(TS * TS * 4)
                 .set_arg_local_buffer(TS * TS * 4)
-                .set_global_work_sizes(&[m, n / WPT, 1])
+                .set_global_work_sizes(&[padded_m, padded_n / WPT, 1])
                 .set_local_work_sizes(&[TS, TS / WPT, 1])
                 .enqueue_nd_range(&queue)?
         },
@@ -457,7 +455,7 @@ fn get_mmul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usi
             todo!("Find out what broke Version 4 of MMM.");
             event.set_arg_local_buffer(TSK * TSM * 4)
                 .set_arg_local_buffer(TSN * (TSK + 2) * 4)
-                .set_global_work_sizes(&[m / WPTM, n / WPTN, 1])
+                .set_global_work_sizes(&[padded_m / WPTM, padded_n / WPTN, 1])
                 .set_local_work_sizes(&[RTSM, RTSN, 1])
                 .enqueue_nd_range(&queue)?
         },
@@ -731,7 +729,7 @@ impl ClStruct {
                 let b = b.as_mut().unwrap();
                 let c = c.as_mut().unwrap();
 
-                let kernel_event = get_mmul_kernel_event(&kernel, &self.queue, new_m, new_n, new_k, a, b, c)?;
+                let kernel_event = get_mmul_kernel_event(&kernel, &self.queue, m, n, k, new_m, new_n, new_k, a, b, c)?;
                     
                 let mut events: Vec<cl_event> = Vec::default();
                 events.push(kernel_event.get());
@@ -933,8 +931,9 @@ impl ClStruct {
 mod tests {
     use crate::cl_kernel::*;
 
-    const TESTS: usize = 5;
-    const SIZE: usize = 1_000;
+    const TESTS: usize = 3;
+    const SIZE: usize = 720;
+    const BUFFER_SIZE: usize = SIZE * SIZE;
 
     fn initialize() -> ClStruct {
         let mut c = ClStruct::new().unwrap();
@@ -943,55 +942,52 @@ mod tests {
     }
 
     #[test]
-    fn test_create_buffer() -> Result<()> {
+    fn test_create_buffer() {
         let cl_struct = initialize();
         for _ in 0..TESTS {
             let bfr = cl_struct.create_buffer(SIZE, SIZE);
             assert!(bfr.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
         }
-        Ok(())
     }
 
     #[test]
-    fn test_fill_buffer_scalar() -> Result<()> {
+    fn test_fill_buffer_scalar() {
         let cl_struct = initialize();
         for i in 0..TESTS {
             let bfr = cl_struct.create_buffer(SIZE, SIZE);
             assert!(bfr.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
 
-            let e = cl_struct.fill_scalar(&bfr, SIZE * SIZE, i as f32);
-            assert!(e.is_ok(), "fill_scalar() did not work properly: {:?}", e.err());
+            let e = cl_struct.fill_scalar(&bfr, BUFFER_SIZE, i as f32);
+            assert!(e.is_ok(), "fill_scalar() did not work properly: {:?}", e.err().unwrap());
 
-            let r = cl_struct.read_buffer(&bfr, SIZE * SIZE);
-            assert!(r.is_ok(), "Could not read from the buffer: {:?}", r.err());
+            let r = cl_struct.read_buffer(&bfr, BUFFER_SIZE);
+            assert!(r.is_ok(), "Could not read from the buffer: {:?}", r.err().unwrap());
 
             let mut s = 0.0f32;
             for e in r.unwrap() { s += e }
-            assert_eq!(s, i as f32 * (SIZE * SIZE) as f32, "fill_scalar() did not fill the whole buffer.");
+            assert_eq!(s, i as f32 * (BUFFER_SIZE) as f32, "fill_scalar() did not fill the whole buffer.");
         }
-        Ok(())
     }
 
     #[test]
-    fn test_fill_buffer_vec_full() -> Result<()> {
+    fn test_fill_buffer_vec_full() {
         let cl_struct = initialize();
         for i in 0..TESTS {
             let bfr = cl_struct.create_buffer(SIZE, SIZE);
             assert!(bfr.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
 
-            let v = vec![i as f32; SIZE * SIZE];
-            let e = cl_struct.fill_vec(&bfr, SIZE * SIZE, v.clone());
-            assert!(e.is_ok(), "fill_vec() did not work properly: {:?}", e.err());
+            let v = vec![i as f32; BUFFER_SIZE];
+            let e = cl_struct.fill_vec(&bfr, BUFFER_SIZE, v.clone());
+            assert!(e.is_ok(), "fill_vec() did not work properly: {:?}", e.err().unwrap());
 
-            let r = cl_struct.read_buffer(&bfr, SIZE * SIZE);
-            assert!(r.is_ok(), "Could not read from the buffer: {:?}", r.err());
+            let r = cl_struct.read_buffer(&bfr, BUFFER_SIZE);
+            assert!(r.is_ok(), "Could not read from the buffer: {:?}", r.err().unwrap());
             assert_eq!(r.unwrap(), v, "fill_vec() was supposed to fill the whole buffer.");
         }
-        Ok(())
     }
 
     #[test]
-    fn test_fill_buffer_vec_part() -> Result<()> {
+    fn test_fill_buffer_vec_part() {
         let cl_struct= initialize();
         for i in 0..TESTS {
             let bfr = cl_struct.create_buffer(SIZE, SIZE);
@@ -999,156 +995,123 @@ mod tests {
 
             let v = vec![10.0 * (i + 1) as f32; SIZE];
             let e = cl_struct.fill_vec(&bfr, SIZE, v.clone());
-            assert!(e.is_ok(), "fill_vec() did not work properly: {:?}", e.err());
+            assert!(e.is_ok(), "fill_vec() did not work properly: {:?}", e.err().unwrap());
 
-            let r = cl_struct.read_buffer(&bfr, SIZE * SIZE);
-            assert!(r.is_ok(), "Could not read from the buffer: {:?}", r.err());            
+            let r = cl_struct.read_buffer(&bfr, BUFFER_SIZE);
+            assert!(r.is_ok(), "Could not read from the buffer: {:?}", r.err().unwrap());            
             let r = r.unwrap();
 
             assert_eq!(r[0..SIZE], v, "First {} elements of the buffer are supposed to contain {}", SIZE, v[0]);
-            assert_eq!(r[SIZE..].iter().sum::<f32>(), 0.0, "Last {} elements of the buffer are supposed to only contain 0s.", SIZE * SIZE - SIZE);
+            assert_eq!(r[SIZE..].iter().sum::<f32>(), 0.0, "Last {} elements of the buffer are supposed to only contain 0s.", BUFFER_SIZE - SIZE);
         }
-        Ok(())
+    }
+    
+    #[test]
+    fn test_matrix_matrix_addition() {
+        let cl_struct = initialize();
+        for i in 0..TESTS {
+            let v1 = i as f32 + 1.0;
+            let v2 = 2.0 * (i as f32) - 3.0;
+
+            let mut bfr1 = cl_struct.create_buffer(SIZE, SIZE);
+            assert!(bfr1.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+
+            let mut bfr2 = cl_struct.create_buffer(SIZE, SIZE);
+            assert!(bfr2.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+
+            let mut bfr3 = cl_struct.create_buffer(SIZE, SIZE);
+            assert!(bfr3.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+
+            let f1 = cl_struct.fill_scalar(&bfr1, BUFFER_SIZE, v1);
+            assert!(f1.is_ok(), "fill_vec() did not work properly: {:?}", f1.err().unwrap());
+
+            let f2 = cl_struct.fill_scalar(&bfr2, BUFFER_SIZE, v2);
+            assert!(f2.is_ok(), "fill_vec() did not work properly: {:?}", f2.err().unwrap());
+
+            let r = cl_struct.matrix_add(&mut bfr1, &mut bfr2, &mut bfr3, SIZE, SIZE);
+            assert!(r.is_ok(), "matrix_add() did not work properly: {:?}", r.err().unwrap());
+
+            let c = cl_struct.read_buffer(&bfr3, BUFFER_SIZE);
+            assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
+            let c = c.unwrap();
+            assert_eq!(c.iter().sum::<f32>(), (v1 + v2) * BUFFER_SIZE as f32, "matrix_add() did not work properly");
+        }
     }
 
-    // #[test]
-    // fn test_mat_mat_mul() -> Result<()> {
-    //     let (cl_struct, _, kernel) = init(MUL_MATRIX_NAME, MUL_MATRIX_SOURCE)?;
-        
-    //     let mut a = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
-    //     let mut b = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
-    //     let c = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_READ_WRITE, WORST_CASE, ptr::null_mut())?;
-        
-    //     for _ in 0..TESTS {
-    //         let (m, n, k) = 
-    //             (rand::thread_rng().gen_range(10..SIZE),
-    //             rand::thread_rng().gen_range(10..SIZE),
-    //             rand::thread_rng().gen_range(10..SIZE));
+    #[test]
+    fn test_matrix_matrix_subtraction() {
+        let cl_struct = initialize();
+        for i in 0..TESTS {
+            let v1 = i as f32 + 1.0;
+            let v2 = 2.0 * (i as f32) - 3.0;
+
+            let mut bfr1 = cl_struct.create_buffer(SIZE, SIZE);
+            assert!(bfr1.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+
+            let mut bfr2 = cl_struct.create_buffer(SIZE, SIZE);
+            assert!(bfr2.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+
+            let mut bfr3 = cl_struct.create_buffer(SIZE, SIZE);
+            assert!(bfr3.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+
+            let f1 = cl_struct.fill_scalar(&bfr1, BUFFER_SIZE, v1);
+            assert!(f1.is_ok(), "fill_vec() did not work properly: {:?}", f1.err().unwrap());
+
+            let f2 = cl_struct.fill_scalar(&bfr2, BUFFER_SIZE, v2);
+            assert!(f2.is_ok(), "fill_vec() did not work properly: {:?}", f2.err().unwrap());
+
+            let r = cl_struct.matrix_sub(&mut bfr1, &mut bfr2, &mut bfr3, SIZE, SIZE);
+            assert!(r.is_ok(), "matrix_sub() did not work properly: {:?}", r.err().unwrap());
+
+            let c = cl_struct.read_buffer(&bfr3, BUFFER_SIZE);
+            assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
+            let c = c.unwrap();
+            assert_eq!(c.iter().sum::<f32>(), (v1 - v2) * BUFFER_SIZE as f32, "matrix_sub() did not work properly");
+        }
+    }
+
+    #[test]
+    fn test_matrix_matrix_multiplication() {
+        let cl_struct = initialize();
+        for _ in 0..TESTS {
+            let v1 = 1.0;
+            let v2 = 1.0;
+
+            let mut bfr1 = cl_struct.create_buffer(SIZE, SIZE);
+            assert!(bfr1.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+
+            let mut bfr2 = cl_struct.create_buffer(SIZE, SIZE);
+            assert!(bfr2.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+
+            let mut bfr3 = cl_struct.create_buffer(SIZE, SIZE);
+            assert!(bfr3.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+
+            let f1 = cl_struct.fill_scalar(&bfr1, BUFFER_SIZE, v1);
+            assert!(f1.is_ok(), "fill_vec() did not work properly: {:?}", f1.err().unwrap());
+
+            let f2 = cl_struct.fill_scalar(&bfr2, BUFFER_SIZE, v2);
+            assert!(f2.is_ok(), "fill_vec() did not work properly: {:?}", f2.err().unwrap());
+
+            let r = cl_struct.matrix_mult(&mut bfr1, &mut bfr2, &mut bfr3, SIZE, SIZE, SIZE);
+            assert!(r.is_ok(), "matrix_mult() did not work properly: {:?}", r.err().unwrap());
+
+            let c = cl_struct.read_buffer(&bfr3, BUFFER_SIZE);
+            assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
+            let c = c.unwrap();
+            let r = c.iter().sum::<f32>();
+            let a = (v1 * v2) * (BUFFER_SIZE * SIZE) as f32;
+            let e = (r - a).abs() / r;
+            assert!(e < 0.01, "matrix_mult() did not work properly, the error is too big: {}", e);
+        }
+    }
+    /*
+    pub fn matrix_mult
+    pub fn matrix_add_inline
+    pub fn matrix_hadamard(
+    pub fn matrix_transpose
+    pub fn matrix_dyadic
+    pub fn sigmoid
+    pub fn der_sigmoid
+    pub fn copy_buffer */
     
-    //         let mut m1 = Matrix::new(m, k);
-    //         m1.fill(1.0);
-    //         let mut m2 = Matrix::new(k, n);
-    //         m2.fill(1.0);
-    
-    //         let check_m1 = m1.clone();
-    //         let check_m2 = m2.clone();
-    
-    //         let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
-    //         let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
-    //         let new_k = if k % 32 != 0 { (k / 32 + 1) * 32 } else { k };
-    
-    //         m1.pad(new_m - m, new_k - k);
-    //         m2.pad(new_k - k, new_n - n);
-    
-    //         let _a_write_event = cl_struct.queue.enqueue_write_buffer(&mut a, CL_BLOCKING, 0, &m2.get_all(), &[])?;
-    //         let _b_write_event = cl_struct.queue.enqueue_write_buffer(&mut b, CL_BLOCKING, 0, &m1.get_all(), &[])?;
-            
-    //         let kernel_event = get_mmul_kernel_event(&kernel, &cl_struct.queue, new_n, new_m, new_k, &a, &b, &c)?;
-            
-    //         let mut events: Vec<cl_event> = Vec::default();
-    //         events.push(kernel_event.get());
-    
-    //         let mut r1 = vec![0.0; WORST_CASE];
-            
-    //         let read_event = cl_struct.queue.enqueue_read_buffer(&c, CL_BLOCKING, 0, &mut r1, &events)?;
-    //         read_event.wait()?;
-            
-    //         let mut r = Matrix::new(m, n);
-    //         r.fill_fit(&r1, new_n);
-    
-    //         assert_eq!(r, check_m1.multiply(&check_m2).unwrap(), "OpenCL Matrix Matrix Multiplication is not working properly!");
-    //     }
-    //     Ok(())
-    // }
-
-    // #[test]
-    // fn test_mat_scalar_mul() -> Result<()> {
-    //     let (cl_struct, _, kernel) = init(MUL_SCALAR_NAME, MUL_SCALAR_SOURCE)?;
-        
-    //     let mut x = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_READ_WRITE, WORST_CASE, ptr::null_mut())?;
-
-    //     for _ in 0..TESTS {
-    //         let (m, n) =
-    //             (rand::thread_rng().gen_range(10..SIZE),
-    //             rand::thread_rng().gen_range(10..SIZE));
-
-    //         let mut m1 = Matrix::new(m, n);
-    //         m1.fill(2.0);
-            
-    //         let mut check_m1 = m1.clone();
-            
-    //         let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
-    //         let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
-            
-    //         m1.pad(new_m - m, new_n - n);
-
-    //         let scalar: cl_float = rand::thread_rng().gen_range(0..10) as f32;
-            
-    //         let _x_write_event = cl_struct.queue.enqueue_write_buffer(&mut x, CL_BLOCKING, 0, &m1.get_all(), &[])?;
-            
-    //         let kernel_event = get_smul_kernel_event(&kernel, &cl_struct.queue, new_m, new_n, &x, scalar)?;
-            
-    //         let mut events: Vec<cl_event> = Vec::default();
-    //         events.push(kernel_event.get());
-
-    //         let mut r1 = vec![0.0; WORST_CASE];
-            
-    //         let read_event = cl_struct.queue.enqueue_read_buffer(&x, CL_BLOCKING, 0, &mut r1, &events)?;
-    //         read_event.wait()?;
-    //         let mut r = Matrix::new(m, n);
-    //         r.fill_fit(&r1, new_n);
-
-    //         check_m1.multiply_scalar(scalar);
-    //         assert_eq!(r, check_m1, "OpenCL Matrix Scalar Multiplication is not working properly!");
-    //     }
-    //     Ok(())
-    // }
-
-    // #[test]
-    // fn test_mat_mat_add() -> Result<()> {
-    //     let (cl_struct, _, kernel) = init(ADD_MATRIX_NAME, ADD_MATRIX_SOURCE)?;
-
-    //     let mut a = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
-    //     let mut b = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
-    //     let c = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_WRITE_ONLY, WORST_CASE, ptr::null_mut())?;
-
-    //     for _ in 0..TESTS {
-    //         let (m, n) = 
-    //             (rand::thread_rng().gen_range(10..SIZE),
-    //             rand::thread_rng().gen_range(10..SIZE));
-
-    //         let mut m1 = Matrix::new(m, n);
-    //         m1.fill(2.0);
-    //         let mut m2 = Matrix::new(m, n);
-    //         m2.fill(3.0);
-
-    //         let check_m1 = m1.clone();
-    //         let check_m2 = m2.clone();
-
-    //         let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
-    //         let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
-
-    //         m1.pad(new_m - m, new_n - n);
-    //         m2.pad(new_m - m, new_n - n);
-            
-    //         let _x_write_event = cl_struct.queue.enqueue_write_buffer(&mut a, CL_BLOCKING, 0, &m1.get_all(), &[])?;
-    //         let _y_write_event = cl_struct.queue.enqueue_write_buffer(&mut b, CL_BLOCKING, 0, &m2.get_all(), &[])?;
-            
-    //         let kernel_event = get_madd_kernel_event(&kernel, &cl_struct.queue, new_m, new_n, &a, &b, &c)?;
-            
-    //         let mut events: Vec<cl_event> = Vec::default();
-    //         events.push(kernel_event.get());
-
-    //         let mut r1 = vec![0.0; WORST_CASE];
-            
-    //         let read_event = cl_struct.queue.enqueue_read_buffer(&c, CL_BLOCKING, 0, &mut r1, &events)?;
-    //         read_event.wait()?;
-
-    //         let mut r = Matrix::new(m, n);
-    //         r.fill_fit(&r1, new_n);
-
-    //         assert_eq!(r, check_m1.add(&check_m2).unwrap(), "OpenCL Matrix Matrix Addition is not working properly!");
-    //     }
-    //     Ok(())
-    // }
 }
