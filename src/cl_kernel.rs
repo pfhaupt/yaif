@@ -1233,6 +1233,77 @@ mod tests {
         let m = m.transpose();
         assert_eq!(c, m.get_all(), "matrix_transpose() did not work properly!");
     }
+
+    #[test]
+    fn test_matrix_matrix_dyadic_square() {
+        let cl_struct = initialize();
+
+        let mut bfr1 = cl_struct.create_buffer(SIZE, 1);
+        assert!(bfr1.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, 1);
+
+        let mut bfr2 = cl_struct.create_buffer(1, SIZE);
+        assert!(bfr2.is_some(), "create_buffer() should be able to create a {}x{} buffer.", 1, SIZE);
+
+        let mut bfr3 = cl_struct.create_buffer(SIZE, SIZE);
+        assert!(bfr3.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+
+        let f1 = cl_struct.fill_scalar(&bfr1, SIZE, V1);
+        assert!(f1.is_ok(), "fill_vec() did not work properly: {:?}", f1.err().unwrap());
+
+        let f2 = cl_struct.fill_scalar(&bfr2, SIZE, V2);
+        assert!(f2.is_ok(), "fill_vec() did not work properly: {:?}", f2.err().unwrap());
+
+        let r = cl_struct.matrix_dyadic(&mut bfr1, &mut bfr2, &mut bfr3, SIZE, SIZE);
+        assert!(r.is_ok(), "matrix_dyadic() did not work properly: {:?}", r.err().unwrap());
+
+        let c = cl_struct.read_buffer(&bfr3, BUFFER_SIZE);
+        assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
+        let c = c.unwrap();
+
+        let mut m1 = Matrix::new(SIZE, 1);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(1, SIZE);
+        m2.fill(V2);
+        let m3 = m1.dyadic_product(&m2).unwrap();
+        assert_eq!(c, m3.get_all(), "matrix_dyadic() did not work properly!");
+    }
+
+    #[test]
+    fn test_matrix_matrix_dyadic_arbitrary() {
+        let cl_struct = initialize();
+
+        let m = 1028;
+        let n = 102;
+
+        let mut bfr1 = cl_struct.create_buffer(m, 1);
+        assert!(bfr1.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, 1);
+
+        let mut bfr2 = cl_struct.create_buffer(1, n);
+        assert!(bfr2.is_some(), "create_buffer() should be able to create a {}x{} buffer.", 1, n);
+
+        let mut bfr3 = cl_struct.create_buffer(m, n);
+        assert!(bfr3.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let f1 = cl_struct.fill_scalar(&bfr1, m, V1);
+        assert!(f1.is_ok(), "fill_vec() did not work properly: {:?}", f1.err().unwrap());
+
+        let f2 = cl_struct.fill_scalar(&bfr2, n, V2);
+        assert!(f2.is_ok(), "fill_vec() did not work properly: {:?}", f2.err().unwrap());
+
+        let r = cl_struct.matrix_dyadic(&mut bfr1, &mut bfr2, &mut bfr3, m, n);
+        assert!(r.is_ok(), "matrix_dyadic() did not work properly: {:?}", r.err().unwrap());
+
+        let c = cl_struct.read_buffer(&bfr3, m * n);
+        assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
+        let c = c.unwrap();
+
+        let mut m1 = Matrix::new(m, 1);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(1, n);
+        m2.fill(V2);
+        let m3 = m1.dyadic_product(&m2).unwrap();
+        assert_eq!(c, m3.get_all(), "matrix_dyadic() did not work properly!");
+    }
     /*
     pub fn matrix_dyadic
     pub fn sigmoid
