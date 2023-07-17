@@ -1,10 +1,18 @@
 #![allow(dead_code, unreachable_code)]
 
+use opencl3::error_codes::ClError;
 use opencl3::event::Event;
-use opencl3::command_queue::CommandQueue;
 use opencl3::kernel::{ExecuteKernel, Kernel};
-use opencl3::memory::Buffer;
+use opencl3::command_queue::{CommandQueue, CL_QUEUE_PROFILING_ENABLE};
+use opencl3::context::Context;
+use opencl3::device::{get_all_devices, Device, CL_DEVICE_TYPE_GPU};
+use opencl3::memory::{Buffer, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE, CL_MEM_WRITE_ONLY};
+use opencl3::program::Program;
+use opencl3::types::{cl_event, cl_float, CL_BLOCKING};
 use opencl3::Result;
+use std::ptr;
+
+use crate::net::cl_net::ClNet;
 
 
 const MMUL_VERSION: usize = 3;
@@ -325,29 +333,14 @@ fn get_smul_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usi
         .enqueue_nd_range(&queue)
 }
 
+pub struct ClStruct {
+    device: Device,
+    context: Context,
+    queue: CommandQueue
+}
 
-#[cfg(test)]
-mod tests {
-    use crate::matrix::Matrix;
-    use crate::cl_kernel::*;
-    
-    use opencl3::command_queue::{CommandQueue, CL_QUEUE_PROFILING_ENABLE};
-    use opencl3::context::Context;
-    use opencl3::device::{get_all_devices, Device, CL_DEVICE_TYPE_GPU};
-    use opencl3::kernel::Kernel;
-    use opencl3::memory::{Buffer, CL_MEM_READ_ONLY, CL_MEM_READ_WRITE, CL_MEM_WRITE_ONLY};
-    use opencl3::program::Program;
-    use opencl3::types::{cl_event, cl_float, CL_BLOCKING};
-    use opencl3::Result;
-    use std::ptr;
-
-    use rand::Rng;
-
-    const TESTS: usize = 5;
-    const SIZE: usize = 1_000;
-    const WORST_CASE: usize = SIZE * SIZE;
-
-    fn init(name: &str, source: &str) -> Result<(Device, Context, CommandQueue, Program, Kernel)> {
+impl ClStruct {
+    pub fn new() -> Result<Self> {
         let device_id = *get_all_devices(CL_DEVICE_TYPE_GPU)?
             .first()
             .expect("no device found in platform");
@@ -355,21 +348,57 @@ mod tests {
         let context = Context::from_device(&device).expect("Context::from_device failed");
         let queue = CommandQueue::create_with_properties(&context, device_id, CL_QUEUE_PROFILING_ENABLE, 0)
             .expect("CommandQueue::create_default failed");
-        
-        let program = Program::create_and_build_from_source(&context, source, "")
-            .expect("Program::create_and_build_from_source failed");
+        Ok( Self { device, context, queue } )
+    }
 
-        let kernel = Kernel::create(&program, name).expect("Kernel::create failed");
-        Ok((device, context, queue, program, kernel))
+    pub fn load_program(&self, source: &str) -> Program {
+        Program::create_and_build_from_source(&self.context, source, "")
+            .expect("Program::create_and_build_from_source failed")
+    }
+
+    pub fn load_kernel(&self, program: &Program, kernel_name: &str) -> Kernel {
+        Kernel::create(program, kernel_name).expect("Kernel::create failed")
+    }
+
+    pub fn load_kernels(&self, cl_net: &mut ClNet) {
+        todo!()
+    }
+
+    pub fn create_buffer(&self, rows: usize, cols: usize) -> Buffer<f32> {
+        let b = Buffer::<cl_float>::create(&self.context, CL_MEM_READ_ONLY, rows * cols, ptr::null_mut());
+        match b {
+            Ok(bfr) => bfr,
+            Err(e) => panic!("Error when creating OpenCL buffer! {}", e)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::matrix::Matrix;
+    use crate::cl_kernel::*;
+    
+    use rand::Rng;
+
+    const TESTS: usize = 5;
+    const SIZE: usize = 1_000;
+    const WORST_CASE: usize = SIZE * SIZE;
+
+    fn init(name: &str, source: &str) -> Result<(ClStruct, Program, Kernel)> {
+        let cl = ClStruct::new()?;
+        
+        let program = cl.load_program(source);
+        let kernel = cl.load_kernel(&program, name);
+        Ok((cl, program, kernel))
     }
 
     #[test]
     fn test_mat_mat_mul() -> Result<()> {
-        let (_, context, queue, _, kernel) = init(MUL_MATRIX_NAME, MUL_MATRIX_SOURCE)?;
+        let (cl_struct, _, kernel) = init(MUL_MATRIX_NAME, MUL_MATRIX_SOURCE)?;
         
-        let mut a = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
-        let mut b = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
-        let c = Buffer::<cl_float>::create(&context, CL_MEM_READ_WRITE, WORST_CASE, ptr::null_mut())?;
+        let mut a = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
+        let mut b = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
+        let c = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_READ_WRITE, WORST_CASE, ptr::null_mut())?;
         
         for _ in 0..TESTS {
             let (m, n, k) = 
@@ -392,17 +421,17 @@ mod tests {
             m1.pad(new_m - m, new_k - k);
             m2.pad(new_k - k, new_n - n);
     
-            let _a_write_event = queue.enqueue_write_buffer(&mut a, CL_BLOCKING, 0, &m2.get_all(), &[])?;
-            let _b_write_event = queue.enqueue_write_buffer(&mut b, CL_BLOCKING, 0, &m1.get_all(), &[])?;
+            let _a_write_event = cl_struct.queue.enqueue_write_buffer(&mut a, CL_BLOCKING, 0, &m2.get_all(), &[])?;
+            let _b_write_event = cl_struct.queue.enqueue_write_buffer(&mut b, CL_BLOCKING, 0, &m1.get_all(), &[])?;
             
-            let kernel_event = get_mmul_kernel_event(&kernel, &queue, new_n, new_m, new_k, &a, &b, &c)?;
+            let kernel_event = get_mmul_kernel_event(&kernel, &cl_struct.queue, new_n, new_m, new_k, &a, &b, &c)?;
             
             let mut events: Vec<cl_event> = Vec::default();
             events.push(kernel_event.get());
     
             let mut r1 = vec![0.0; WORST_CASE];
             
-            let read_event = queue.enqueue_read_buffer(&c, CL_BLOCKING, 0, &mut r1, &events)?;
+            let read_event = cl_struct.queue.enqueue_read_buffer(&c, CL_BLOCKING, 0, &mut r1, &events)?;
             read_event.wait()?;
             
             let mut r = Matrix::new(m, n);
@@ -415,9 +444,9 @@ mod tests {
 
     #[test]
     fn test_mat_scalar_mul() -> Result<()> {
-        let (_, context, queue, _, kernel) = init(MUL_SCALAR_NAME, MUL_SCALAR_SOURCE)?;
+        let (cl_struct, _, kernel) = init(MUL_SCALAR_NAME, MUL_SCALAR_SOURCE)?;
         
-        let mut x = Buffer::<cl_float>::create(&context, CL_MEM_READ_WRITE, WORST_CASE, ptr::null_mut())?;
+        let mut x = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_READ_WRITE, WORST_CASE, ptr::null_mut())?;
 
         for _ in 0..TESTS {
             let (m, n) =
@@ -436,16 +465,16 @@ mod tests {
 
             let scalar: cl_float = rand::thread_rng().gen_range(0..10) as f32;
             
-            let _x_write_event = queue.enqueue_write_buffer(&mut x, CL_BLOCKING, 0, &m1.get_all(), &[])?;
+            let _x_write_event = cl_struct.queue.enqueue_write_buffer(&mut x, CL_BLOCKING, 0, &m1.get_all(), &[])?;
             
-            let kernel_event = get_smul_kernel_event(&kernel, &queue, new_m, new_n, &x, scalar)?;
+            let kernel_event = get_smul_kernel_event(&kernel, &cl_struct.queue, new_m, new_n, &x, scalar)?;
             
             let mut events: Vec<cl_event> = Vec::default();
             events.push(kernel_event.get());
 
             let mut r1 = vec![0.0; WORST_CASE];
             
-            let read_event = queue.enqueue_read_buffer(&x, CL_BLOCKING, 0, &mut r1, &events)?;
+            let read_event = cl_struct.queue.enqueue_read_buffer(&x, CL_BLOCKING, 0, &mut r1, &events)?;
             read_event.wait()?;
             let mut r = Matrix::new(m, n);
             r.fill_fit(&r1, new_n);
@@ -458,11 +487,11 @@ mod tests {
 
     #[test]
     fn test_mat_mat_add() -> Result<()> {
-        let (_, context, queue, _, kernel) = init(ADD_MATRIX_NAME, ADD_MATRIX_SOURCE)?;
+        let (cl_struct, _, kernel) = init(ADD_MATRIX_NAME, ADD_MATRIX_SOURCE)?;
 
-        let mut a = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
-        let mut b = Buffer::<cl_float>::create(&context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
-        let c = Buffer::<cl_float>::create(&context, CL_MEM_WRITE_ONLY, WORST_CASE, ptr::null_mut())?;
+        let mut a = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
+        let mut b = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_READ_ONLY, WORST_CASE, ptr::null_mut())?;
+        let c = Buffer::<cl_float>::create(&cl_struct.context, CL_MEM_WRITE_ONLY, WORST_CASE, ptr::null_mut())?;
 
         for _ in 0..TESTS {
             let (m, n) = 
@@ -483,17 +512,17 @@ mod tests {
             m1.pad(new_m - m, new_n - n);
             m2.pad(new_m - m, new_n - n);
             
-            let _x_write_event = queue.enqueue_write_buffer(&mut a, CL_BLOCKING, 0, &m1.get_all(), &[])?;
-            let _y_write_event = queue.enqueue_write_buffer(&mut b, CL_BLOCKING, 0, &m2.get_all(), &[])?;
+            let _x_write_event = cl_struct.queue.enqueue_write_buffer(&mut a, CL_BLOCKING, 0, &m1.get_all(), &[])?;
+            let _y_write_event = cl_struct.queue.enqueue_write_buffer(&mut b, CL_BLOCKING, 0, &m2.get_all(), &[])?;
             
-            let kernel_event = get_madd_kernel_event(&kernel, &queue, new_m, new_n, &a, &b, &c)?;
+            let kernel_event = get_madd_kernel_event(&kernel, &cl_struct.queue, new_m, new_n, &a, &b, &c)?;
             
             let mut events: Vec<cl_event> = Vec::default();
             events.push(kernel_event.get());
 
             let mut r1 = vec![0.0; WORST_CASE];
             
-            let read_event = queue.enqueue_read_buffer(&c, CL_BLOCKING, 0, &mut r1, &events)?;
+            let read_event = cl_struct.queue.enqueue_read_buffer(&c, CL_BLOCKING, 0, &mut r1, &events)?;
             read_event.wait()?;
 
             let mut r = Matrix::new(m, n);
