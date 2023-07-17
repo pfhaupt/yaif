@@ -7,7 +7,7 @@ use opencl3::memory::Buffer;
 use opencl3::Result;
 
 
-const MMUL_VERSION: usize = 2;
+const MMUL_VERSION: usize = 3;
 
 const TS: usize = 16;
 
@@ -110,7 +110,7 @@ kernel void matrix_mul_matrix(
 "#
 } else if MMUL_VERSION == 3 { // Version 3 (working)
 r#"
-#define TS 8
+#define TS 16
 #define WPT 4
 #define RTS (TS / WPT)
 kernel void matrix_mul_matrix(
