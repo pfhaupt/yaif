@@ -9,11 +9,6 @@ const TARGET_ACCURACY: f32 = 0.95;
 const FLOATING_WEIGHT: f32 = 0.0;
 const VALIDATION_SIZE: usize = 500;
 
-const BATCH_SIZE: usize = 100;
-const TRAINING_DATA: usize = 2_500;
-const EPOCH_SIZE: usize = TRAINING_DATA / BATCH_SIZE;
-const EPOCH_COUNT: usize = 100;
-
 #[derive(Default)]
 pub struct NN {
     // General stuff
@@ -121,24 +116,6 @@ impl NetTrait for NN {
         self.floating_average
     }
 
-    fn run(&mut self, debug: bool) -> bool {
-        for _ in 0..EPOCH_COUNT {
-            for _ in 0..EPOCH_SIZE {
-                for _ in 0..BATCH_SIZE {
-                    self.train();
-                }
-                self.adapt_weights();
-            }
-            if debug {
-                self.print_guess();
-            }
-            if self.is_finished() {
-                return true;
-            }
-        }
-        false
-    }
-
     fn learn(&mut self) {
         // Feedforward
         self.calculate_layers();
@@ -201,6 +178,30 @@ impl NetTrait for NN {
             index
         }
     }
+    
+    fn train(&mut self) {
+        let index = self.training_data.get_random_index();
+        let input = self.training_data.get_input(index).as_vec();
+        let output = self.training_data.get_output(index);
+        // println!("{:?} {:?}", input, output);
+        self.internal_train(&input, &output.as_vec());
+    }
+
+    fn adapt_weights(&mut self) {
+        // println!("{:?}", self);
+        for i in (0..=self.last_layer).rev() {
+            self.avg_bias[i].multiply_scalar(LEARN_FACTOR);
+            self.bias[i] = self.bias[i].sub(&self.avg_bias[i]).unwrap();
+
+            // self.weights[i].multiply_scalar(LEARN_REG_BATCH_FACTOR);
+            self.avg_weight[i].multiply_scalar(LEARN_FACTOR);
+            self.weights[i] = self.weights[i].sub(&self.avg_weight[i]).unwrap();
+        }
+        for i in 0..self.layer_count {
+            self.avg_bias[i].fill(0.0);
+            self.avg_weight[i].fill(0.0);
+        }
+    }
 
     fn set_target(&mut self, target: &Vec<f32>) {
         self.target_vector.fill_vec(target);
@@ -247,8 +248,6 @@ impl NN {
         }
     }
 
-    
-
     fn initialize_network(&mut self) {
         for i in 0..self.layer_count {
             let len = self.layer_lengths[i];
@@ -288,36 +287,13 @@ impl NN {
         }
     }
 
-    fn train(&mut self) {
-        let index = self.training_data.get_random_index();
-        let input = self.training_data.get_input(index).as_vec();
-        let output = self.training_data.get_output(index);
-        // println!("{:?} {:?}", input, output);
-        self.internal_train(&input, &output.as_vec());
-    }
-
+    
     fn internal_train(&mut self, input: &Vec<f32>, output: &Vec<f32>) {
         self.set_target(output);
         self.set_input(input);
         self.learn();
     }
-
-    fn adapt_weights(&mut self) {
-        // println!("{:?}", self);
-        for i in (0..=self.last_layer).rev() {
-            self.avg_bias[i].multiply_scalar(LEARN_FACTOR);
-            self.bias[i] = self.bias[i].sub(&self.avg_bias[i]).unwrap();
-
-            // self.weights[i].multiply_scalar(LEARN_REG_BATCH_FACTOR);
-            self.avg_weight[i].multiply_scalar(LEARN_FACTOR);
-            self.weights[i] = self.weights[i].sub(&self.avg_weight[i]).unwrap();
-        }
-        for i in 0..self.layer_count {
-            self.avg_bias[i].fill(0.0);
-            self.avg_weight[i].fill(0.0);
-        }
-    }
-
+    
     fn generate_validation(&mut self) -> f32 {
         let mut correct = 0;
         let mut total = 0;
