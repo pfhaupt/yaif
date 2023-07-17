@@ -1142,7 +1142,7 @@ mod tests {
     }
      
     #[test]
-    fn test_matrix_matrix_hadamard() {
+    fn test_matrix_matrix_hadamard_square() {
         let cl_struct = initialize();
 
         let mut bfr1 = cl_struct.create_buffer(SIZE, SIZE);
@@ -1169,6 +1169,40 @@ mod tests {
 
         let r = c.iter().map(|f| *f as usize).sum::<usize>();
         let a = (V1 * V2) as usize * BUFFER_SIZE;
+        assert_eq!(r, a, "matrix_hadamard() did not work properly");
+    }
+
+    #[test]
+    fn test_matrix_matrix_hadamard_arbitrary() {
+        let cl_struct = initialize();
+
+        let m = 1201;
+        let n = 120;
+
+        let mut bfr1 = cl_struct.create_buffer(m, n);
+        assert!(bfr1.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let mut bfr2 = cl_struct.create_buffer(m, n);
+        assert!(bfr2.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let mut bfr3 = cl_struct.create_buffer(m, n);
+        assert!(bfr3.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let f1 = cl_struct.fill_scalar(&bfr1, m * n, V1);
+        assert!(f1.is_ok(), "fill_scalar() did not work properly: {:?}", f1.err().unwrap());
+
+        let f2 = cl_struct.fill_scalar(&bfr2, m * n, V2);
+        assert!(f2.is_ok(), "fill_scalar() did not work properly: {:?}", f2.err().unwrap());
+
+        let r = cl_struct.matrix_hadamard(&mut bfr1, &mut bfr2, &mut bfr3, m, n);
+        assert!(r.is_ok(), "matrix_hadamard() did not work properly: {:?}", r.err().unwrap());
+
+        let c = cl_struct.read_buffer(&bfr3, m * n);
+        assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
+        let c = c.unwrap();
+
+        let r = c.iter().map(|f| *f as usize).sum::<usize>();
+        let a = (V1 * V2) as usize * m * n;
         assert_eq!(r, a, "matrix_hadamard() did not work properly");
     }
     
@@ -1304,8 +1338,8 @@ mod tests {
         let m3 = m1.dyadic_product(&m2).unwrap();
         assert_eq!(c, m3.get_all(), "matrix_dyadic() did not work properly!");
     }
+    
     /*
-    pub fn matrix_dyadic
     pub fn sigmoid
     pub fn der_sigmoid
     pub fn copy_buffer */
