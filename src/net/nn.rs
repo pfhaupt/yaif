@@ -1,5 +1,5 @@
-use super::matrix::Matrix;
-use super::data_set::DataSet;
+use super::super::matrix::Matrix;
+use super::super::data_set::DataSet;
 use std::fmt::{ Debug, Formatter };
 
 const LEARN_FACTOR: f32 = 0.05;
@@ -367,7 +367,6 @@ impl NN {
         t * (1.0 - t)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
