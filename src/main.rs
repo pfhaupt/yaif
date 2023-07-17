@@ -106,42 +106,50 @@ fn test_add(kernel: &Kernel, context: &Context, queue: &CommandQueue, tests: usi
 }
 
 fn test_smul(kernel: &Kernel, context: &Context, queue: &CommandQueue, tests: usize, size: usize) -> Result<u64> {
-    let array_size = size * size;
+    let worst_case = (if size % 32 != 0 { (size / 32 + 1) * 32 } else { size }).pow(2);
 
-    let mut gs = (array_size / 64) * 64;
-    if gs == 0 || !array_size.is_power_of_two() { 
-        gs += 64;
-    }
-
-    let mut x = Buffer::<cl_float>::create(&context, CL_MEM_READ_WRITE, gs, ptr::null_mut())?;
+    let mut x = Buffer::<cl_float>::create(&context, CL_MEM_READ_WRITE, worst_case, ptr::null_mut())?;
 
     let mut dur = 0;
 
     for _ in 0..tests {
-        let (mut m1, _) = init_mat(size);
+        let m = rand::thread_rng().gen_range(10..size);
+        let n = rand::thread_rng().gen_range(10..size);
+
+        let mut m1 = Matrix::new(m, n);
+        m1.fill(2.0);
+        
+        let mut check_m1 = m1.clone();
+        
+        let new_m = if m % 32 != 0 { (m / 32 + 1) * 32 } else { m };
+        let new_n = if n % 32 != 0 { (n / 32 + 1) * 32 } else { n };
+        
+        m1.pad(new_m - m, new_n - n);
+
         let scalar: cl_float = rand::thread_rng().gen_range(0..10) as f32;
         
         let _x_write_event = queue.enqueue_write_buffer(&mut x, CL_BLOCKING, 0, &m1.get_all(), &[])?;
+        
         let kernel_event = 
             ExecuteKernel::new(&kernel)
                 .set_arg(&x)
                 .set_arg(&scalar)
-                .set_global_work_sizes(&[gs, 1, 1])
+                .set_global_work_sizes(&[worst_case, 1, 1])
                 .set_local_work_sizes(&[64, 1, 1])
                 .enqueue_nd_range(&queue)?;
         
         let mut events: Vec<cl_event> = Vec::default();
         events.push(kernel_event.get());
 
-        let mut r1 = vec![0.0; array_size];
+        let mut r1 = vec![0.0; worst_case];
         
         let read_event = queue.enqueue_read_buffer(&x, CL_BLOCKING, 0, &mut r1, &events)?;
         read_event.wait()?;
-        let mut r = Matrix::new(size, size);
-        r.fill_vec(&r1);
+        let mut r = Matrix::new(m, n);
+        r.fill_fit(&r1, new_n);
 
-        m1.multiply_scalar(scalar);
-        assert_eq!(r, m1, "OpenCL Matrix Scalar Multiplication is not working properly!");
+        check_m1.multiply_scalar(scalar);
+        assert_eq!(r, check_m1, "OpenCL Matrix Scalar Multiplication is not working properly!");
 
         let start_time = kernel_event.profiling_command_start()?;
         let end_time = kernel_event.profiling_command_end()?;
@@ -263,12 +271,12 @@ fn main() -> Result<()> {
         let basic_dur = now.elapsed().as_nanos() - elapsed.as_nanos();
         println!(" -- Basic matrix matrix addition        ({:4}x{:4}): {:16?}ns", size, size, basic_dur);
 
-        // let cl_dur = time_cl(&mul_scalar_kernel, &context, &queue, TESTS, size, "smul");
-        // println!(" -- OpenCL matrix scalar multiplication ({:4}x{:4}): {:16?}ns", size, size, cl_dur);
-        // let now = Instant::now();
-        // time_basic(TESTS, size, "smul");
-        // let basic_dur = now.elapsed().as_nanos() - elapsed.as_nanos();
-        // println!(" -- Basic matrix scalar multiplication  ({:4}x{:4}): {:16?}ns", size, size, basic_dur);
+        let cl_dur = time_cl(&mul_scalar_kernel, &context, &queue, TESTS, size, "smul");
+        println!(" -- OpenCL matrix scalar multiplication ({:4}x{:4}): {:16?}ns", size, size, cl_dur);
+        let now = Instant::now();
+        time_basic(TESTS, size, "smul");
+        let basic_dur = now.elapsed().as_nanos() - elapsed.as_nanos();
+        println!(" -- Basic matrix scalar multiplication  ({:4}x{:4}): {:16?}ns", size, size, basic_dur);
         
         // let cl_dur = time_cl(&mul_matrix_kernel, &context, &queue, TESTS, size, "mmul");
         // println!(" -- OpenCL matrix matrix multiplication ({:5}x{:5}): {:16?}ns", size, size, cl_dur);
