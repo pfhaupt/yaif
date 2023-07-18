@@ -4,6 +4,13 @@ use opencl3::{memory::Buffer, error_codes::ClError};
 
 use super::NetTrait;
 
+const LEARN_FACTOR: f32 = 0.05;
+// const REGULATION_FACTOR: f32 = 1e-11;
+// const LEARN_REG_BATCH_FACTOR: f32 = 1.0;
+const TARGET_ACCURACY: f32 = 0.95;
+const FLOATING_WEIGHT: f32 = 0.0;
+const VALIDATION_SIZE: usize = 500;
+
 pub struct ClNet {
     // General stuff
     layer_lengths: Vec<usize>,
@@ -206,7 +213,22 @@ impl NetTrait for ClNet {
     }
 
     fn adapt_weights(&mut self) {
-        todo!()
+        for i in (1..self.layer_count).rev() {
+            let (m, n) = self.bias_dims[i];
+            self.cl_struct.matrix_scalar_mult(&mut self.avg_bias[i], LEARN_FACTOR, m, n).unwrap();
+            self.cl_struct.matrix_sub_inline(&mut self.bias[i], &mut self.avg_bias[i], m, n).unwrap();
+
+            let (m, n) = self.weight_dims[i];
+            self.cl_struct.matrix_scalar_mult(&mut self.avg_weight[i], LEARN_FACTOR, m, n).unwrap();
+            self.cl_struct.matrix_sub_inline(&mut self.weights[i], &mut self.avg_weight[i], m, n).unwrap();
+        }
+        for i in 0..self.layer_count {
+            let (m, n) = self.bias_dims[i];
+            self.cl_struct.fill_scalar(&self.avg_bias[i], m, n, 0.0).unwrap();
+
+            let (m, n) = self.weight_dims[i];
+            self.cl_struct.fill_scalar(&self.avg_weight[i], m, n, 0.0).unwrap();
+        }
     }
     
     fn set_target(&mut self, target: &Vec<f32>) {
