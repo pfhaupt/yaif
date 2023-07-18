@@ -1448,8 +1448,78 @@ mod tests {
         assert_eq!(c, m3.get_all(), "matrix_dyadic() did not work properly!");
     }
     
+    #[test]
+    fn test_matrix_sigmoid_square() {
+        let cl_struct = initialize();
+
+        let sigmoid = |val: f32| -> f32 {
+            1.0 /  (1.0 + (-val).exp())
+        };
+
+        let mut from = cl_struct.create_buffer(SIZE, SIZE);
+        assert!(from.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+
+        let mut to = cl_struct.create_buffer(SIZE, SIZE);
+        assert!(to.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+
+        let mut r1 = vec![0.0; BUFFER_SIZE];
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        for i in 0..BUFFER_SIZE { r1[i] = normal.sample(&mut rand::thread_rng()); }
+
+        let f1 = cl_struct.fill_vec(&from, BUFFER_SIZE, r1.clone());
+        assert!(f1.is_ok(), "fill_vec() did not work properly: {:?}", f1.err().unwrap());
+
+        let e = cl_struct.sigmoid(&mut from, &mut to, SIZE, SIZE);
+        assert!(e.is_ok(), "sigmoid() did not work properly: {:?}", e.err().unwrap());
+
+        let r2 = cl_struct.read_buffer(&to, BUFFER_SIZE);
+        assert!(r2.is_ok(), "read_buffer() did not work properly: {:?}", r2.err().unwrap());
+        let r2 = r2.unwrap();
+
+        let r1: Vec<f32> = r1.iter().map(|f| sigmoid(*f)).collect();
+        
+        let e = r1.iter().zip(r2.iter()).all(|(f1, f2)|(f1 - f2).abs() <= f32::EPSILON);
+        assert!(e, "sigmoid() did not work properly!");
+    }
+
+    #[test]
+    fn test_matrix_sigmoid_arbitrary() {
+        let cl_struct = initialize();
+
+        let m = 1290;
+        let n = 51;
+
+        let sigmoid = |val: f32| -> f32 {
+            1.0 /  (1.0 + (-val).exp())
+        };
+
+        let mut from = cl_struct.create_buffer(m, n);
+        assert!(from.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let mut to = cl_struct.create_buffer(m, n);
+        assert!(to.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let mut r1 = vec![0.0; m * n];
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        for i in 0..(m * n) { r1[i] = normal.sample(&mut rand::thread_rng()); }
+
+        let f1 = cl_struct.fill_vec(&from, m * n, r1.clone());
+        assert!(f1.is_ok(), "fill_vec() did not work properly: {:?}", f1.err().unwrap());
+
+        let e = cl_struct.sigmoid(&mut from, &mut to, m, n);
+        assert!(e.is_ok(), "sigmoid() did not work properly: {:?}", e.err().unwrap());
+
+        let r2 = cl_struct.read_buffer(&to, m * n);
+        assert!(r2.is_ok(), "read_buffer() did not work properly: {:?}", r2.err().unwrap());
+        let r2 = r2.unwrap();
+
+        let r1: Vec<f32> = r1.iter().map(|f| sigmoid(*f)).collect();
+        
+        let e = r1.iter().zip(r2.iter()).all(|(f1, f2)|(f1 - f2).abs() <= f32::EPSILON);
+        assert!(e, "sigmoid() did not work properly!");
+    }
+    
     /*
-    pub fn sigmoid
     pub fn der_sigmoid
     pub fn copy_buffer */
     
