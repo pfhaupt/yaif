@@ -168,15 +168,11 @@ impl NetTrait for ClNet {
             let (m, n) = self.weight_dims[i + 1];
             self.cl_struct.matrix_transpose(&mut self.weights[i + 1], &mut self.transposed_weights[i + 1], m, n).unwrap();
             
-            let (n1, m) = self.weight_dims[i + 1]; // reversed order because transposed
-            let (n2, k) = self.error_dims[i + 1];
-            assert_eq!(n1, n2);
-            let n = n1;
+            let (n, m) = self.weight_dims[i + 1]; // reversed order because transposed
+            let (_, k) = self.error_dims[i];
 
-            // TODO: This is just wrong on so many levels
-            // But I can't borrow self.errors[i] and self.errors[i + 1] at the same time...
             // self.cl_struct.matrix_mult(&mut self.transposed_weights[i + 1], &mut self.errors[i + 1], &mut elf.errors[i], m, n, k).unwrap();
-            self.cl_struct.matrix_mult(&mut self.transposed_weights[i + 1], &mut self.errors[i + 1], &mut self.error_buffer[i + 1], m, n, k).unwrap();
+            self.cl_struct.matrix_mult(&mut self.transposed_weights[i + 1], &mut self.errors[i + 1], &mut self.error_buffer[i], m, n, k).unwrap();
             
             let (m, n) = self.error_dims[i];
             self.cl_struct.matrix_hadamard(&mut self.error_buffer[i], &mut self.der_activation[i], &mut self.errors[i], m, n).unwrap();
@@ -198,7 +194,7 @@ impl NetTrait for ClNet {
         for i in 0..self.layer_count {
             let (m, n) = self.bias_dims[i];
             self.cl_struct.matrix_add_inline(&mut self.avg_bias[i], &mut self.bias_gradient[i], m, n).unwrap();
-            
+
             let (m, n) = self.weight_dims[i];
             self.cl_struct.matrix_add_inline(&mut self.avg_weight[i], &mut self.weight_gradient[i], m, n).unwrap();
 
