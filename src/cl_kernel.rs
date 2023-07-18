@@ -1263,6 +1263,53 @@ mod tests {
     }
     
     #[test]
+    fn test_matrix_scalar_multiplication_square() {
+        let cl_struct = initialize();
+
+        let mut bfr1 = cl_struct.create_buffer(SIZE, SIZE);
+        assert!(bfr1.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+
+        let f1 = cl_struct.fill_scalar(&bfr1, SIZE, SIZE, V1);
+        assert!(f1.is_ok(), "fill_scalar() did not work properly: {:?}", f1.err().unwrap());
+
+        let r = cl_struct.matrix_scalar_mult(&mut bfr1, V2, SIZE, SIZE);
+        assert!(r.is_ok(), "matrix_scalar_mult() did not work properly: {:?}", r.err().unwrap());
+
+        let c = cl_struct.read_buffer(&bfr1, BUFFER_SIZE);
+        assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
+        let c = c.unwrap();
+
+        let r = c.iter().map(|f| *f as usize).sum::<usize>();
+        let a = (V1 * V2) as usize * BUFFER_SIZE;
+        assert_eq!(r, a, "matrix_scalar_mult() did not work properly");
+    }
+
+    #[test]
+    fn test_matrix_scalar_multiplication_arbitrary() {
+        let cl_struct = initialize();
+
+        let m = 1290;
+        let n = 819;
+
+        let mut bfr1 = cl_struct.create_buffer(m, n);
+        assert!(bfr1.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, n);
+
+        let f1 = cl_struct.fill_scalar(&bfr1, m, n, V1);
+        assert!(f1.is_ok(), "fill_scalar() did not work properly: {:?}", f1.err().unwrap());
+
+        let r = cl_struct.matrix_scalar_mult(&mut bfr1, V2, m, n);
+        assert!(r.is_ok(), "matrix_scalar_mult() did not work properly: {:?}", r.err().unwrap());
+
+        let c = cl_struct.read_buffer(&bfr1, m * n);
+        assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
+        let c = c.unwrap();
+
+        let r = c.iter().map(|f| *f as usize).sum::<usize>();
+        let a = (V1 * V2) as usize * (m * n);
+        assert_eq!(r, a, "matrix_scalar_mult() did not work properly");
+    }
+    
+    #[test]
     fn test_matrix_matrix_addition_inline_square() {
         let cl_struct = initialize();
 
