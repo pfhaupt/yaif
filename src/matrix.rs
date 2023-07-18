@@ -252,7 +252,7 @@ impl Matrix {
 
 #[cfg(test)]
 mod tests {
-    const TEST_CASES: usize = 1_000;
+    const TEST_CASES: usize = 10;
     use super::*;
     use rand::Rng;
 

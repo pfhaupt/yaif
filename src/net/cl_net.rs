@@ -210,11 +210,11 @@ impl NetTrait for ClNet {
     }
     
     fn set_target(&mut self, target: &Vec<f32>) {
-        self.fill_buffer_vec(&self.layers[self.last_layer], target.len(), target.clone()).unwrap();
+        self.fill_buffer_vec(&self.layers[self.last_layer], target.len(), 1, target.clone()).unwrap();
     }
 
     fn set_input(&mut self, input: &Vec<f32>) {
-        self.fill_buffer_vec(&self.layers[0], input.len(), input.clone()).unwrap();
+        self.fill_buffer_vec(&self.layers[0], input.len(), 1, input.clone()).unwrap();
     }
 
     fn calculate_cost(&mut self) {
@@ -277,13 +277,13 @@ impl ClNet {
             self.weight_dims[i] = (curr_len, prev_len);
 
             let two_over_input_count = 2.0 / (prev_len as f32);
-            self.fill_buffer_gauss(&self.weights[i], curr_len * prev_len, 0.0, two_over_input_count)?;
+            self.fill_buffer_gauss(&self.weights[i], curr_len, prev_len, 0.0, two_over_input_count)?;
 
             self.bias[i] = self.cl_struct.create_buffer(curr_len, 1);
             self.transposed_bias[i] = self.cl_struct.create_buffer(1, curr_len);
             self.bias_dims[i] = (curr_len, 1);
 
-            self.fill_buffer_scalar(&self.bias[i], curr_len, 0.1)?;
+            self.fill_buffer_scalar(&self.bias[i], curr_len, 1, 0.1)?;
         }
 
         for i in 0..self.layer_count {
@@ -336,15 +336,15 @@ impl ClNet {
         self.cl_struct = cl_struct
     }
 
-    fn fill_buffer_vec(&self, buffer: &Option<Buffer<f32>>, size: usize, values: Vec<f32>) -> Result<(), ClError> {
-        self.cl_struct.fill_vec(buffer, size, values)
+    fn fill_buffer_vec(&self, buffer: &Option<Buffer<f32>>, m: usize, n: usize, values: Vec<f32>) -> Result<(), ClError> {
+        self.cl_struct.fill_vec(buffer, m, n, values)
     }
 
-    fn fill_buffer_scalar(&self, buffer: &Option<Buffer<f32>>, size: usize, val: f32) -> Result<(), ClError> {
-        self.cl_struct.fill_scalar(buffer, size, val)
+    fn fill_buffer_scalar(&self, buffer: &Option<Buffer<f32>>, m: usize, n: usize, val: f32) -> Result<(), ClError> {
+        self.cl_struct.fill_scalar(buffer, m, n, val)
     }
 
-    fn fill_buffer_gauss(&self, buffer: &Option<Buffer<f32>>, size: usize, mean: f32, variance: f32) -> Result<(), ClError> {
-        self.cl_struct.fill_gauss(buffer, size, mean, variance)
+    fn fill_buffer_gauss(&self, buffer: &Option<Buffer<f32>>, m: usize, n: usize, mean: f32, variance: f32) -> Result<(), ClError> {
+        self.cl_struct.fill_gauss(buffer, m, n, mean, variance)
     }
 }
