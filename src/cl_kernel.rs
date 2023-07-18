@@ -656,7 +656,7 @@ impl ClStruct {
         let b = Buffer::<cl_float>::create(&self.context, CL_MEM_READ_WRITE, (rows * cols).max(1), ptr::null_mut());
         match b {
             Ok(bfr) => Some(bfr),
-            Err(e) => panic!("Error when creating OpenCL buffer! {}", e)
+            Err(_) => None
         }
     }
 
