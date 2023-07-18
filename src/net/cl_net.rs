@@ -178,6 +178,7 @@ impl NetTrait for ClNet {
             self.cl_struct.matrix_hadamard(&mut self.error_buffer[i], &mut self.der_activation[i], &mut self.errors[i], m, n).unwrap();
         }
 
+        // Gradiant Weights
         for i in 1..self.layer_count {
             let (m, n) = self.layer_dims[i - 1];
             self.cl_struct.matrix_transpose(&mut self.layers[i - 1], &mut self.transposed_layers[i - 1], m, n).unwrap();
@@ -244,7 +245,7 @@ impl NetTrait for ClNet {
     }
 
     fn adapt_weights(&mut self) {
-        for i in (0..self.layer_count).rev() {
+        for i in (0..=self.last_layer).rev() {
             let (m, n) = self.bias_dims[i];
             self.cl_struct.matrix_scalar_mult(&mut self.avg_bias[i], LEARN_FACTOR, m, n).unwrap();
             self.cl_struct.matrix_sub_inline(&mut self.bias[i], &mut self.avg_bias[i], m, n).unwrap();
@@ -267,7 +268,7 @@ impl NetTrait for ClNet {
     }
 
     fn set_input(&mut self, input: &Vec<f32>) {
-        self.fill_buffer_vec(&self.layers[0], input.clone(), input.len(), 1).unwrap();
+        self.fill_buffer_vec(&self.layers[0], input.clone(),input.len(), 1).unwrap();
     }
 
     fn calculate_cost(&mut self) {
@@ -391,7 +392,7 @@ impl ClNet {
     }
 
     fn calculate_activation(&mut self, layer: usize) {
-        let (r, c) = self.active_dims[layer];
+        let (r, c) = self.layer_dims[layer];
         self.cl_struct.sigmoid(&mut self.pre_activation[layer], &mut self.layers[layer], r, c).unwrap()
     }
     

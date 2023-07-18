@@ -16,8 +16,8 @@ pub trait NetTrait {
     fn is_finished(&mut self) -> bool;
     fn get_average_accuracy(&mut self) -> f32;
 
-    fn run(&mut self, debug: bool) -> bool {
-        for _ in 0..EPOCH_COUNT {
+    fn run(&mut self, debug: bool) -> Option<usize> {
+        for i in 1..=EPOCH_COUNT {
             for _ in 0..EPOCH_SIZE {
                 for _ in 0..BATCH_SIZE {
                     self.train();
@@ -28,10 +28,10 @@ pub trait NetTrait {
                 self.print_guess();
             }
             if self.is_finished() {
-                return true;
+                return Some(i);
             }
         }
-        false
+        None
     }
 
     fn learn(&mut self);

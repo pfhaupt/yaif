@@ -554,23 +554,23 @@ fn get_smul_kernel_event(kernel: &Kernel, queue: &CommandQueue, buffer: &Buffer<
 
 fn get_fill_kernel_event(kernel: &Kernel, queue: &CommandQueue, buffer: &Buffer<f32>, scalar: f32, m: usize, n: usize) -> Result<Event> {
     ExecuteKernel::new(&kernel)
-        .set_arg(&(m as u32))
-        .set_arg(&(n as u32))
+        .set_arg(&((m * n) as u32))
+        .set_arg(&(2 as u32))
         .set_arg(buffer)
         .set_arg(&scalar)
-        .set_global_work_sizes(&[pad(m, TS), pad(n, TS), 1])
-        .set_local_work_sizes(&[TS, TS, 1])
+        .set_global_work_sizes(&[pad(m * n, TS), 1, 1])
+        .set_local_work_sizes(&[TS, 1, 1])
         .enqueue_nd_range(&queue)
 }
 
 fn get_fill_vec_kernel_event(kernel: &Kernel, queue: &CommandQueue, from: &Buffer<f32>, to: &Buffer<f32>, m: usize, n: usize) -> Result<Event> {
     ExecuteKernel::new(&kernel)
-        .set_arg(&(m as u32))
-        .set_arg(&(n as u32))
+        .set_arg(&((m * n) as u32))
+        .set_arg(&(2 as u32))
         .set_arg(from)
         .set_arg(to)
-        .set_global_work_sizes(&[pad(m, TS), pad(n, TS), 1])
-        .set_local_work_sizes(&[TS, TS, 1])
+        .set_global_work_sizes(&[pad(m * n, TS), 1, 1])
+        .set_local_work_sizes(&[TS, 1, 1])
         .enqueue_nd_range(&queue)
 }
 
@@ -720,6 +720,7 @@ impl ClStruct {
             
                         let fill_event = get_fill_vec_kernel_event(k,
                             &self.queue, &val_bfr, bfr, m, n)?;
+                        fill_event.wait()?;
                         let mut events: Vec<cl_event> = Vec::default();
                         events.push(fill_event.get());
                         Ok(())
@@ -738,6 +739,7 @@ impl ClStruct {
                     Some(bfr) => {
                             let fill_event = get_fill_kernel_event(k,
                                 &self.queue, &bfr, val, m, n)?;
+                            fill_event.wait()?;
                             let mut events: Vec<cl_event> = Vec::default();
                             events.push(fill_event.get());
                             Ok(())
