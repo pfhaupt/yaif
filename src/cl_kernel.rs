@@ -78,6 +78,21 @@ kernel void matrix_add_inline(
     A[i] = A[i] + B[i];
 }"#;
 
+const SUB_MATRIX_INLINE_NAME: &str = "matrix_sub_inline";
+const SUB_MATRIX_INLINE_SOURCE: &str = r#"
+kernel void matrix_sub_inline(
+    const int M,
+    const int N,
+    global float* A,
+    global float const* B)
+{
+    const int globalRow = get_global_id(0);
+    const int globalCol = get_global_id(1);
+    if (globalRow >= M || globalCol >= N) return;
+    const int i = globalCol * M + globalRow;
+    A[i] = A[i] - B[i];
+}"#;
+
 const MUL_SCALAR_NAME: &str = "matrix_mul_scalar";
 const MUL_SCALAR_SOURCE: &str = r#"
 kernel void matrix_mul_scalar(
@@ -421,10 +436,11 @@ kernel void matrix_dyadic(
 }
 "#;
 
-const IMPLEMENTED_KERNELS: [&str; 12] = [
+const IMPLEMENTED_KERNELS: [&str; 13] = [
     ADD_MATRIX_NAME,
     ADD_MATRIX_INLINE_NAME,
     SUB_MATRIX_NAME,
+    SUB_MATRIX_INLINE_NAME,
     MUL_MATRIX_NAME,
     MUL_SCALAR_NAME,
     FILL_MATRIX_NAME,
@@ -505,6 +521,17 @@ fn get_msub_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usi
 }
 
 fn get_madd_inline_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, b: &Buffer<f32>) -> Result<Event> {
+    ExecuteKernel::new(&kernel)
+        .set_arg(&(m as u32))
+        .set_arg(&(n as u32))
+        .set_arg(a)
+        .set_arg(b)
+        .set_global_work_sizes(&[pad(m, TS), pad(n, TS), 1])
+        .set_local_work_sizes(&[TS, TS, 1])
+        .enqueue_nd_range(&queue)
+}
+
+fn get_msub_inline_kernel_event(kernel: &Kernel, queue: &CommandQueue, m: usize, n: usize, a: &Buffer<f32>, b: &Buffer<f32>) -> Result<Event> {
     ExecuteKernel::new(&kernel)
         .set_arg(&(m as u32))
         .set_arg(&(n as u32))
@@ -635,7 +662,7 @@ impl ClStruct {
     }
 
     pub fn load_kernels(&mut self) {
-        assert!(IMPLEMENTED_KERNELS.len() == 12, "Can not load all kernels yet");
+        assert!(IMPLEMENTED_KERNELS.len() == 13, "Can not load all kernels yet");
         if MMUL_VERSION != 1 {
             eprintln!("\x1b[93m[WARNING] You've selected a MMUL_VERSION that only properly works for Matrices with Dim(A)=2^n!\x1b[0m");
         }
@@ -647,6 +674,7 @@ impl ClStruct {
         add_kernel(ADD_MATRIX_NAME, ADD_MATRIX_SOURCE);
         add_kernel(ADD_MATRIX_INLINE_NAME, ADD_MATRIX_INLINE_SOURCE);
         add_kernel(SUB_MATRIX_NAME, SUB_MATRIX_SOURCE);
+        add_kernel(SUB_MATRIX_INLINE_NAME, SUB_MATRIX_INLINE_SOURCE);
         add_kernel(MUL_SCALAR_NAME, MUL_SCALAR_SOURCE);
         add_kernel(MUL_MATRIX_NAME, MUL_MATRIX_SOURCE);
         add_kernel(FILL_MATRIX_NAME, FILL_MATRIX_SOURCE);
@@ -791,6 +819,41 @@ impl ClStruct {
                 let b = b.as_mut().unwrap();
 
                 let kernel_event = get_madd_inline_kernel_event(&kernel, &self.queue, m, n, a, b)?;
+                    
+                let mut events: Vec<cl_event> = Vec::default();
+                events.push(kernel_event.get());
+
+                Ok(())
+
+            }
+        }
+    }
+
+    pub fn matrix_sub_inline(&self, a: &mut Option<Buffer<f32>>, b: &mut Option<Buffer<f32>>, m: usize, n: usize) -> Result<()> {
+        match self.kernels.get(&String::from(SUB_MATRIX_INLINE_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(kernel) => {
+                let a = a.as_mut().unwrap();
+                let b = b.as_mut().unwrap();
+
+                let kernel_event = get_msub_inline_kernel_event(&kernel, &self.queue, m, n, a, b)?;
+                    
+                let mut events: Vec<cl_event> = Vec::default();
+                events.push(kernel_event.get());
+
+                Ok(())
+
+            }
+        }
+    }
+
+    pub fn matrix_scalar_mult(&self, a: &mut Option<Buffer<f32>>, scalar: f32, m: usize, n: usize) -> Result<()> {
+        match self.kernels.get(&String::from(MUL_SCALAR_NAME)) {
+            None => panic!("Could not find kernel in HashMap!"),
+            Some(kernel) => {
+                let a = a.as_mut().unwrap();
+
+                let kernel_event = get_smul_kernel_event(&kernel, &self.queue, m, n, a, scalar)?;
                     
                 let mut events: Vec<cl_event> = Vec::default();
                 events.push(kernel_event.get());
