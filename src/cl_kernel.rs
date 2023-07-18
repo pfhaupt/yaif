@@ -78,7 +78,6 @@ kernel void matrix_add_inline(
     A[i] = A[i] + B[i];
 }"#;
 
-
 const MUL_SCALAR_NAME: &str = "matrix_mul_scalar";
 const MUL_SCALAR_SOURCE: &str = r#"
 kernel void matrix_mul_scalar(
@@ -925,6 +924,18 @@ mod tests {
 
         let bfr = cl_struct.create_buffer(SIZE, SIZE);
         assert!(bfr.is_some(), "create_buffer() should be able to create a {}x{} buffer.", SIZE, SIZE);
+    }
+
+    #[test]
+    fn test_create_and_fill_buffer_too_big() {
+        let cl_struct = initialize();
+        const S: usize = 1 << 24;
+
+        let bfr = cl_struct.create_buffer(S, S);
+        assert!(bfr.is_some(), "create_buffer() should be able to create a {}x{} buffer.", S, S);
+
+        let e = cl_struct.fill_scalar(&bfr, S * S, 1.0);
+        assert!(e.is_err(), "fill_buffer() should fail unless you have {}GB of VRAM.", (S * S * 4) / (1024 * 1024 * 1024));
     }
 
     #[test]
