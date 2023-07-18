@@ -3,10 +3,10 @@ use crate::data_set::DataSet;
 pub mod nn;
 pub mod cl_net;
 
-const BATCH_SIZE: usize = 100;
-const TRAINING_DATA: usize = 2_500;
+const BATCH_SIZE: usize = 50;
+const TRAINING_DATA: usize = 10_000;
 const EPOCH_SIZE: usize = TRAINING_DATA / BATCH_SIZE;
-const EPOCH_COUNT: usize = 100;
+const EPOCH_COUNT: usize = 1_000;
 
 pub trait NetTrait {
     fn initialize_layers(&mut self, layer_sizes: Vec<usize>);

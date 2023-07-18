@@ -5,8 +5,8 @@ use std::fmt::{ Debug, Formatter };
 const LEARN_FACTOR: f32 = 0.05;
 // const REGULATION_FACTOR: f32 = 1e-11;
 // const LEARN_REG_BATCH_FACTOR: f32 = 1.0;
-const TARGET_ACCURACY: f32 = 0.95;
-const FLOATING_WEIGHT: f32 = 0.0;
+const TARGET_ACCURACY: f32 = 0.98;
+const FLOATING_WEIGHT: f32 = 0.1;
 const VALIDATION_SIZE: usize = 500;
 
 #[derive(Default)]

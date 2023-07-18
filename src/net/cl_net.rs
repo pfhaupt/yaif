@@ -7,8 +7,8 @@ use super::NetTrait;
 const LEARN_FACTOR: f32 = 0.05;
 // const REGULATION_FACTOR: f32 = 1e-11;
 // const LEARN_REG_BATCH_FACTOR: f32 = 1.0;
-const TARGET_ACCURACY: f32 = 0.95;
-const FLOATING_WEIGHT: f32 = 0.0;
+const TARGET_ACCURACY: f32 = 0.98;
+const FLOATING_WEIGHT: f32 = 0.1;
 const VALIDATION_SIZE: usize = 500;
 
 pub struct ClNet {
@@ -32,6 +32,7 @@ pub struct ClNet {
     bias: Vec<Option<Buffer<f32>>>,
     transposed_bias: Vec<Option<Buffer<f32>>>,
     errors: Vec<Option<Buffer<f32>>>,
+    error_buffer: Vec<Option<Buffer<f32>>>,
     pre_activation: Vec<Option<Buffer<f32>>>,
     der_activation: Vec<Option<Buffer<f32>>>,
 
@@ -73,6 +74,7 @@ impl Default for ClNet {
             bias: vec![],
             transposed_bias: vec![],
             errors: vec![],
+            error_buffer: vec![],
             pre_activation: vec![],
             der_activation: vec![],
 
@@ -118,6 +120,7 @@ impl NetTrait for ClNet {
         fill_none(&mut self.bias);
         fill_none(&mut self.transposed_bias);
         fill_none(&mut self.errors);
+        fill_none(&mut self.error_buffer);
         fill_none(&mut self.pre_activation);
         fill_none(&mut self.der_activation);
         fill_none(&mut self.avg_weight);
@@ -132,6 +135,7 @@ impl NetTrait for ClNet {
 
     fn initialize_training_data(&mut self, data: &DataSet) {
         self.training_data = data.clone();
+        self.initialize_validation_data(data);
     }
 
     fn initialize_validation_data(&mut self, data: &DataSet) {
@@ -139,10 +143,13 @@ impl NetTrait for ClNet {
     }
 
     fn is_finished(&mut self) -> bool {
-        todo!()
+        self.get_average_accuracy() >= TARGET_ACCURACY
     }
+
     fn get_average_accuracy(&mut self) -> f32 {
-        todo!()
+        self.floating_average *= FLOATING_WEIGHT;
+        self.floating_average += (1.0 - FLOATING_WEIGHT) * self.generate_validation();
+        self.floating_average
     }
 
     fn learn(&mut self) {
@@ -169,13 +176,10 @@ impl NetTrait for ClNet {
             // TODO: This is just wrong on so many levels
             // But I can't borrow self.errors[i] and self.errors[i + 1] at the same time...
             // self.cl_struct.matrix_mult(&mut self.transposed_weights[i + 1], &mut self.errors[i + 1], &mut elf.errors[i], m, n, k).unwrap();
-            let mut bfr = self.cl_struct.create_buffer(n, k);
-            self.cl_struct.matrix_mult(&mut self.transposed_weights[i + 1], &mut self.errors[i + 1], &mut bfr, m, n, k).unwrap();
+            self.cl_struct.matrix_mult(&mut self.transposed_weights[i + 1], &mut self.errors[i + 1], &mut self.error_buffer[i + 1], m, n, k).unwrap();
             
             let (m, n) = self.error_dims[i];
-            // Nevermind, the next line would've been bad anyway, no need to read the buffer and copy it over
-            // Another TODO: Outsource create_buffer, there's no reason to do it every single time
-            self.cl_struct.matrix_hadamard(&mut bfr, &mut self.der_activation[i], &mut self.errors[i], m, n).unwrap();
+            self.cl_struct.matrix_hadamard(&mut self.error_buffer[i], &mut self.der_activation[i], &mut self.errors[i], m, n).unwrap();
         }
 
         for i in 1..self.layer_count {
@@ -194,6 +198,7 @@ impl NetTrait for ClNet {
         for i in 0..self.layer_count {
             let (m, n) = self.bias_dims[i];
             self.cl_struct.matrix_add_inline(&mut self.avg_bias[i], &mut self.bias_gradient[i], m, n).unwrap();
+            
             let (m, n) = self.weight_dims[i];
             self.cl_struct.matrix_add_inline(&mut self.avg_weight[i], &mut self.weight_gradient[i], m, n).unwrap();
 
@@ -201,7 +206,37 @@ impl NetTrait for ClNet {
     }
 
     fn guess(&mut self, input: &Vec<f32>) -> usize {
-        todo!()
+        self.set_input(input);
+
+        self.calculate_layers();
+
+        let (m, n) = self.layer_dims[self.last_layer];
+        
+        let mut r = self.cl_struct.read_buffer(&self.layers[self.last_layer], m * n).unwrap();
+        if r.len() == 1 {
+            r[0].round() as usize
+        } else {
+            let size = r.len();
+
+            let mut sum = 0.0;
+            for i in 0..size {
+                sum += r[i].exp();
+            }
+            for i in 0..size {
+                let new_val = r[i].exp();
+                r[i] = new_val / sum;
+            }
+            let mut index = usize::MAX;
+            let mut highest_prob = 0.0;
+            for i in 0..size {
+                let g = r[i];
+                if g > highest_prob {
+                    highest_prob = g;
+                    index = i;
+                }
+            }
+            index
+        }
     }
 
     fn train(&mut self) {
@@ -213,7 +248,7 @@ impl NetTrait for ClNet {
     }
 
     fn adapt_weights(&mut self) {
-        for i in (1..self.layer_count).rev() {
+        for i in (0..self.layer_count).rev() {
             let (m, n) = self.bias_dims[i];
             self.cl_struct.matrix_scalar_mult(&mut self.avg_bias[i], LEARN_FACTOR, m, n).unwrap();
             self.cl_struct.matrix_sub_inline(&mut self.bias[i], &mut self.avg_bias[i], m, n).unwrap();
@@ -251,7 +286,14 @@ impl NetTrait for ClNet {
     }
 
     fn print_guess(&mut self) {
-        todo!()
+        for _ in 0..10 {
+            let index = self.validation_data.get_random_index();
+            let input = self.validation_data.get_input(index).as_vec();
+            let output = self.validation_data.get_output(index);
+            let g = self.guess(&input);
+            println!("Guess: {}, Solution: {}", g, output.get_solution());
+        }
+        println!("Average: {:.2}%", self.floating_average * 100.0);
     }
 }
 
@@ -281,6 +323,7 @@ impl ClNet {
             self.layer_dims[i] = (len, 1);
 
             self.errors[i] = self.cl_struct.create_buffer(len, 1);
+            self.error_buffer[i] = self.cl_struct.create_buffer(len, 1);
             self.error_dims[i] = (len, 1);
 
             self.pre_activation[i] = self.cl_struct.create_buffer(len, 1);
@@ -289,6 +332,14 @@ impl ClNet {
 
             self.bias_gradient[i] = self.cl_struct.create_buffer(len, 1);
         }
+
+        self.weights[0] = self.cl_struct.create_buffer(0, 0);
+        self.weight_dims[0] = (0, 0);
+        self.transposed_weights[0] = self.cl_struct.create_buffer(0, 0);
+        self.bias[0] = self.cl_struct.create_buffer(0, 0);
+        self.bias_dims[0] = (0, 0);
+        self.errors[0] = self.cl_struct.create_buffer(0, 0);
+        self.error_dims[0] = (0, 0);
 
         for i in 1..self.layer_count {
             let prev_len = self.layer_lengths[i - 1];
@@ -327,8 +378,7 @@ impl ClNet {
 
     fn calculate_layer(&mut self, layer: usize) {
         let (m, n1) = self.weight_dims[layer];
-        let (n2, k) = self.layer_dims[layer - 1];
-        assert_eq!(n1, n2);
+        let (_, k) = self.layer_dims[layer - 1];
         let n = n1;
         self.cl_struct.matrix_mult(&mut self.weights[layer], &mut self.layers[layer - 1], &mut self.pre_activation[layer], m, n, k).unwrap();
         
@@ -349,7 +399,22 @@ impl ClNet {
         self.cl_struct.sigmoid(&mut self.pre_activation[layer], &mut self.layers[layer], r, c).unwrap()
     }
     
-    
+    fn generate_validation(&mut self) -> f32 {
+        let mut correct = 0;
+        let mut total = 0;
+        for _ in 0..VALIDATION_SIZE {
+            let index = self.validation_data.get_random_index();
+            let input = self.validation_data.get_input(index).as_vec();
+            let output = self.validation_data.get_output(index);
+            let g = self.guess(&input);
+            if g == output.get_solution() as usize {
+                correct += 1;
+            }
+            total += 1;
+        }
+        (correct as f32) / (total as f32)
+    }
+
     fn load_kernels(&mut self) {
         self.cl_struct.load_kernels();
     }
