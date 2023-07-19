@@ -1225,9 +1225,9 @@ mod tests {
     fn test_matrix_matrix_multiplication_arbitrary() {
         let cl_struct = initialize();
 
-        let m = 1290;
-        let n = 819;
-        let k = 510;
+        let m = 578;
+        let n = 1212;
+        let k = 109;
 
         let mut bfr1 = cl_struct.create_buffer(m, k);
         assert!(bfr1.is_some(), "create_buffer() should be able to create a {}x{} buffer.", m, k);
@@ -1251,9 +1251,13 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
 
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 * V2) as usize * (m * n * k);
-        assert_eq!(r, a, "matrix_mult() did not work properly");
+        let mut m1 = Matrix::new(m, k);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(k, n);
+        m2.fill(V2);
+        let r1 = m1.multiply(&m2).unwrap();
+
+        assert_eq!(c, r1.get_all(), "matrix_mult() did not work properly");
     }
     
     #[test]
