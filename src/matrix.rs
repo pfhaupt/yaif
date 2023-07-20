@@ -252,153 +252,116 @@ impl Matrix {
 
 #[cfg(test)]
 mod tests {
-    const TEST_CASES: usize = 10;
     use super::*;
     use rand::Rng;
 
+    fn get_test_data(which: &str) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+        // Some random data generated using numpy
+        // Represent 3x7 Matrices (7x7 for Multiplication)
+        let input1 = vec![9, 6, 4, 4, 1, 0, 0, 1, 6, 0, 2, 9, 3, 0, 3, 0, 9, 1, 0, 0, 0].iter().map(|v| *v as f32).collect::<Vec<f32>>();
+        let input2 = vec![3, 4, 1, 8, 8, 6, 8, 9, 7, 9, 4, 1, 4, 2, 5, 1, 8, 7, 0, 6, 9].iter().map(|v| *v as f32).collect::<Vec<f32>>();
+        let output = match which {
+            "add" => { vec![12, 10, 5, 12, 9, 6, 8, 10, 13, 9, 6, 10, 7, 2, 8, 1, 17, 8, 0, 6, 9] },
+            "sub" => { vec![6, 2, 3, -4, -7, -6, -8, -8, -1, -9, -2, 8, -1, -2, -2, -1, 1, -6, 0, -6, -9] },
+            "mul" => { vec![101, 82, 95, 124, 78, 102, 120, 21, 23, 13, 36, 33, 28, 34, 39, 13, 57, 46, 1, 40, 56, 63, 23, 90, 71, 2, 62, 85, 24, 15, 27, 45, 24, 36, 51, 86, 64, 89, 43, 9, 42, 27, 0, 0, 0, 0, 0, 0, 0]}
+            "scalar" => { input1.iter().map(|v| *v as i32 * 5).collect() },
+            e => unimplemented!("{}", e)
+        };
+        (input1, input2, output.iter().map(|v| *v as f32).collect::<Vec<f32>>())
+    }
+
     #[test]
     fn init_matrix() {
-        for _ in 0..TEST_CASES {
-            let r = rand::thread_rng().gen_range(0..100);
-            let c = rand::thread_rng().gen_range(0..100);
+        let r = rand::thread_rng().gen_range(0..100);
+        let c = rand::thread_rng().gen_range(0..100);
 
-            let result = Matrix::new(r, c);
-            assert_eq!(result, Matrix { rows: r, cols: c, size: r * c, content: vec![0.0; r * c] });
-        }
+        let result = Matrix::new(r, c);
+        assert_eq!(result, Matrix { rows: r, cols: c, size: r * c, content: vec![0.0; r * c] });
     }
 
     #[test]
     fn add_wrong_dim() {
-        for _ in 0..TEST_CASES {
-            let rows: usize = rand::thread_rng().gen_range(5..100);
-            let cols: usize = rand::thread_rng().gen_range(5..100);
+        let rows: usize = rand::thread_rng().gen_range(5..100);
+        let cols: usize = rand::thread_rng().gen_range(5..100);
 
-            let m1 = Matrix::new(rows, cols);
-            let m2 = Matrix::new(cols + 1, rows + 1);
-            let r1 = m1.add(&m2);
-            let r2 = m2.add(&m1);
+        let m1 = Matrix::new(rows, cols);
+        let m2 = Matrix::new(cols + 1, rows + 1);
+        let r1 = m1.add(&m2);
+        let r2 = m2.add(&m1);
 
-            assert!(r1.is_err());
-            assert!(r2.is_err());
-        }
+        assert!(r1.is_err());
+        assert!(r2.is_err());
     }
 
     #[test]
     fn add_correct_dim() {
-        for _ in 0..TEST_CASES {
-            let rows: usize = rand::thread_rng().gen_range(5..100);
-            let cols: usize = rand::thread_rng().gen_range(5..100);
-
-            let mut m1 = Matrix::new(rows, cols);
-            let mut m2 = Matrix::new(rows, cols);
-            let mut control_vector = vec![0.0; rows * cols];
-            for i in 0..rows {
-                for j in 0..cols {
-                    let v1 = rand::thread_rng().gen_range(0.0..10.0);
-                    let v2 = rand::thread_rng().gen_range(0.0..10.0);
-                    m1.set_unchecked(i, j, v1);
-                    m2.set_unchecked(i, j, v2);
-                    control_vector[m1.get_index(i, j)] = v1 + v2;
-                }
-            }
-            let result = m1.add(&m2);
-
-            assert_eq!(result.unwrap().content, control_vector);
-        }
+        let (i1, i2, o) = get_test_data("add");
+        let mut m1 = Matrix::new(3, 7);
+        m1.fill_vec(&i1);
+        let mut m2 = Matrix::new(3, 7);
+        m2.fill_vec(&i2);
+        let m3 = m1.add(&m2).unwrap();
+        let m4 = m2.add(&m1).unwrap();
+        assert_eq!(m3.get_all(), o, "Matrix.add() is not working properly!");
+        assert_eq!(m4.get_all(), o, "Matrix.add() is not working properly!");
+        assert_eq!(m3, m4, "Matrix.add() is not assoziative!");
     }
 
     #[test]
     fn sub_wrong_dim() {
-        for _ in 0..TEST_CASES {
-            let rows: usize = rand::thread_rng().gen_range(5..100);
-            let cols: usize = rand::thread_rng().gen_range(5..100);
+        let rows: usize = rand::thread_rng().gen_range(5..100);
+        let cols: usize = rand::thread_rng().gen_range(5..100);
 
-            let m1 = Matrix::new(rows, cols);
-            let m2 = Matrix::new(cols + 1, rows + 1);
-            let r1 = m1.sub(&m2);
-            let r2 = m2.sub(&m1);
+        let m1 = Matrix::new(rows, cols);
+        let m2 = Matrix::new(cols + 1, rows + 1);
+        let r1 = m1.sub(&m2);
+        let r2 = m2.sub(&m1);
 
-            assert!(r1.is_err());
-            assert!(r2.is_err());
-        }
+        assert!(r1.is_err());
+        assert!(r2.is_err());
     }
 
     #[test]
     fn sub_correct_dim() {
-        for _ in 0..TEST_CASES {
-            let rows: usize = rand::thread_rng().gen_range(5..100);
-            let cols: usize = rand::thread_rng().gen_range(5..100);
-
-            let mut m1 = Matrix::new(rows, cols);
-            let mut m2 = Matrix::new(rows, cols);
-            let mut control_vector = vec![0.0; rows * cols];
-            for i in 0..rows {
-                for j in 0..cols {
-                    let v1 = rand::thread_rng().gen_range(0.0..10.0);
-                    let v2 = rand::thread_rng().gen_range(0.0..10.0);
-                    m1.set_unchecked(i, j, v1);
-                    m2.set_unchecked(i, j, v2);
-                    control_vector[m1.get_index(i, j)] = v1 - v2;
-                }
-            }
-            let result = m1.sub(&m2);
-
-            assert_eq!(result.unwrap().content, control_vector);
-        }
+        let (i1, i2, o) = get_test_data("sub");
+        let mut m1 = Matrix::new(3, 7);
+        m1.fill_vec(&i1);
+        let mut m2 = Matrix::new(3, 7);
+        m2.fill_vec(&i2);
+        let m3 = m1.sub(&m2).unwrap();
+        assert_eq!(m3.get_all(), o, "Matrix.sub() is not working properly!");
     }
 
     #[test]
     fn mult_wrong_dim() {
-        for _ in 0..TEST_CASES {
-            let rows: usize = rand::thread_rng().gen_range(5..100);
-            let cols: usize = rand::thread_rng().gen_range(5..100);
+        let (i1, i2, _) = get_test_data("add");
+        
+        let mut m1 = Matrix::new(3, 7);
+        m1.fill_vec(&i1);
+        let mut m2 = Matrix::new(3, 7);
+        m2.fill_vec(&i2);
 
-            let m1 = Matrix::new(rows, cols);
-            let m2 = Matrix::new(cols + 1, rows + 1);
-            let r1 = m1.multiply(&m2);
-            let r2 = m2.multiply(&m1);
-
-            assert!(r1.is_err());
-            assert!(r2.is_err());
-        }
+        let r = m1.multiply(&m2);
+        assert!(r.is_err(), "Matrix.mult() is supposed to fail for wrong dimensions!");
     }
 
     #[test]
     fn mult_correct_dim() {
-        // TODO: Add true test, this just passes as long as the dimensions are correct, hehe
-        for _ in 0..TEST_CASES {
-            let rows: usize = rand::thread_rng().gen_range(5..100);
-            let cols: usize = rand::thread_rng().gen_range(5..100);
-
-            let m1 = Matrix::new(rows, cols);
-            let m2 = Matrix::new(cols, rows);
-            let r1 = m1.multiply(&m2);
-            let r2 = m2.multiply(&m1);
-
-            assert!(r1.is_ok());
-            assert!(r2.is_ok());
-        }
+        let (i1, i2, o) = get_test_data("mul");
+        let mut m1 = Matrix::new(7, 3);
+        m1.fill_vec(&i1);
+        let mut m2 = Matrix::new(3, 7);
+        m2.fill_vec(&i2);
+        let m3 = m1.multiply(&m2).unwrap();
+        assert_eq!(m3.get_all(), o, "Matrix.mult() is not working properly!");
     }
 
     #[test]
     fn mult_scalar() {
-        for _ in 0..TEST_CASES {
-            let rows: usize = rand::thread_rng().gen_range(5..100);
-            let cols: usize = rand::thread_rng().gen_range(5..100);
-            let scalar = rand::thread_rng().gen_range(0.0..10.0);
-
-            let mut m1 = Matrix::new(rows, cols);
-            let mut control_vector = vec![0.0; rows * cols];
-            for i in 0..rows {
-                for j in 0..cols {
-                    let v1 = rand::thread_rng().gen_range(0.0..10.0);
-                    m1.set_unchecked(i, j, v1);
-                    control_vector[m1.get_index(i, j)] = v1 * scalar;
-                }
-            }
-            m1.multiply_scalar(scalar);
-
-            assert_eq!(m1.content, control_vector);
-        }
+        let (i1, _, o) = get_test_data("scalar");
+        let mut m1 = Matrix::new(7, 3);
+        m1.fill_vec(&i1);
+        m1.multiply_scalar(5.0);
+        assert_eq!(m1.get_all(), o, "Matrix.mult_scalar() is not working properly!");
     }
 }
