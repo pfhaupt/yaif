@@ -1,8 +1,8 @@
 use crate::{cl_kernel::ClStruct, data_set::DataSet, cl_buffer::ClBuffer};
 
-use opencl3::{error_codes::ClError};
-
 use super::NetTrait;
+
+use opencl3::error_codes::ClError;
 
 const LEARN_FACTOR: f32 = 0.05;
 // const REGULATION_FACTOR: f32 = 1e-11;
@@ -16,13 +16,6 @@ pub struct ClNet {
     layer_lengths: Vec<usize>,
     layer_count: usize,
     last_layer: usize,
-
-    // Buffers are 1D, but matrix ops need 2D, so I need to store each dimension
-    layer_dims: Vec<(usize, usize)>,
-    weight_dims: Vec<(usize, usize)>,
-    bias_dims: Vec<(usize, usize)>,
-    error_dims: Vec<(usize, usize)>,
-    active_dims: Vec<(usize, usize)>,
 
     // The magic, but this time with GPU buffers
     layers: Vec<ClBuffer>,
@@ -60,12 +53,6 @@ impl Default for ClNet {
             layer_lengths: vec![],
             layer_count: 0,
             last_layer: 0,
-            
-            layer_dims: vec![],
-            weight_dims: vec![],
-            bias_dims: vec![],
-            error_dims: vec![],
-            active_dims: vec![],
 
             layers: vec![],
             transposed_layers: vec![],
@@ -101,37 +88,25 @@ impl NetTrait for ClNet {
         self.layer_lengths = layer_sizes.clone();
         self.layer_count = self.layer_lengths.len();
         self.last_layer = self.layer_count - 1;
-        
-        self.layer_dims = vec![(0, 0); self.layer_count];
-        self.weight_dims = vec![(0, 0); self.layer_count];
-        self.bias_dims = vec![(0, 0); self.layer_count];
-        self.error_dims = vec![(0, 0); self.layer_count];
-        self.active_dims = vec![(0, 0); self.layer_count];
 
         for i in 0..self.layer_count {
             let len = self.layer_lengths[i];
             self.layers.push(ClBuffer::new(&self.cl_struct, len, 1));
             self.transposed_layers.push(ClBuffer::new(&self.cl_struct, 1, len));
-            self.layer_dims.push((len, 1));
 
             self.errors.push(ClBuffer::new(&self.cl_struct, len, 1));
             self.error_buffer.push(ClBuffer::new(&self.cl_struct, 1, len));
-            self.error_dims.push((len, 1));
 
             self.pre_activation.push(ClBuffer::new(&self.cl_struct, len, 1));
             self.der_activation.push(ClBuffer::new(&self.cl_struct, len, 1));
-            self.active_dims.push((len, 1));
 
             self.bias_gradient.push(ClBuffer::new(&self.cl_struct, len, 1));
         }
 
         self.weights.push(ClBuffer::new(&self.cl_struct, 0, 0));
-        self.weight_dims.push((0, 0));
         self.transposed_weights.push(ClBuffer::new(&self.cl_struct, 0, 0));
         self.bias.push(ClBuffer::new(&self.cl_struct, 0, 0));
-        self.bias_dims.push((0, 0));
         self.errors.push(ClBuffer::new(&self.cl_struct, 0, 0));
-        self.error_dims.push((0, 0));
 
         for i in 1..self.layer_count {
             let prev_len = self.layer_lengths[i - 1];
@@ -139,28 +114,26 @@ impl NetTrait for ClNet {
 
             self.weights.push(ClBuffer::new(&self.cl_struct, curr_len, prev_len));
             self.transposed_weights.push(ClBuffer::new(&self.cl_struct, prev_len, curr_len));
-            self.weight_dims.push((curr_len, prev_len));
 
             let two_over_input_count = 2.0 / (prev_len as f32);
-            match self.fill_buffer_gauss(&self.weights[i], 0.0, two_over_input_count, curr_len, prev_len) {
+            match self.fill_buffer_gauss(&self.weights[i], 0.0, two_over_input_count) {
                 Ok(()) => {},
                 Err(e) => panic!("Unrecoverable error when initializing Network layers: {}", e)
             }
 
             self.bias.push(ClBuffer::new(&self.cl_struct, curr_len, 1));
             self.transposed_bias.push(ClBuffer::new(&self.cl_struct, 1, curr_len));
-            self.bias_dims.push((curr_len, 1));
 
-            match self.fill_buffer_scalar(&self.bias[i], 0.1, curr_len, 1) {
+            match self.fill_buffer_scalar(&self.bias[i], 0.1) {
                 Ok(()) => {},
                 Err(e) => panic!("Unrecoverable error when initializing Network layers: {}", e)
             }
         }
 
         for i in 0..self.layer_count {
-            let (b_row, b_col) = self.bias_dims[i];
-            let (w_row, w_col) = self.weight_dims[i];
-            
+            let (b_row, b_col) = self.bias[i].get_dims();
+            let (w_row, w_col) = self.weights[i].get_dims();
+
             self.avg_bias.push(ClBuffer::new(&self.cl_struct, b_row, b_col));
             self.avg_weight.push(ClBuffer::new(&self.cl_struct, w_row, w_col));
             self.weight_gradient.push(ClBuffer::new(&self.cl_struct, w_row, w_col));
@@ -197,46 +170,28 @@ impl NetTrait for ClNet {
 
         self.calculate_derivations();
 
-        let (m, n) = self.active_dims[self.last_layer];
         self.cl_struct.matrix_hadamard(&mut self.current_cost, &mut self.der_activation[self.last_layer], &mut self.errors[self.last_layer]).unwrap();
 
         // Backpropagation is now ready to go
-
         for i in (1..(self.layer_count - 1)).rev() {
-            let (m, n) = self.weight_dims[i + 1];
             self.cl_struct.matrix_transpose(&mut self.weights[i + 1], &mut self.transposed_weights[i + 1]).unwrap();
-            
-            let (n, m) = self.weight_dims[i + 1]; // reversed order because transposed
-            let (_, k) = self.error_dims[i];
-
-            // self.cl_struct.matrix_mult(&mut self.transposed_weights[i + 1], &mut self.errors[i + 1], &mut elf.errors[i], m, n, k).unwrap();
             self.cl_struct.matrix_mult(&mut self.transposed_weights[i + 1], &mut self.errors[i + 1], &mut self.error_buffer[i]).unwrap();
-            
-            let (m, n) = self.error_dims[i];
             self.cl_struct.matrix_hadamard(&mut self.error_buffer[i], &mut self.der_activation[i], &mut self.errors[i]).unwrap();
         }
 
         // Gradiant Weights
         for i in 1..self.layer_count {
-            let (m, n) = self.layer_dims[i - 1];
             self.cl_struct.matrix_transpose(&mut self.layers[i - 1], &mut self.transposed_layers[i - 1]).unwrap();
-
-            let (m, n) = self.weight_dims[i];
             self.cl_struct.matrix_dyadic(&mut self.errors[i], &mut self.transposed_layers[i - 1], &mut self.weight_gradient[i]).unwrap();
         }
 
         for i in 0..self.layer_count {
-            let (m, n) = self.error_dims[i];
             self.cl_struct.copy_buffer(&mut self.errors[i], &mut self.bias_gradient[i]).unwrap();
         }
 
         for i in 0..self.layer_count {
-            let (m, n) = self.bias_dims[i];
             self.cl_struct.matrix_add_inline(&mut self.avg_bias[i], &mut self.bias_gradient[i]).unwrap();
-
-            let (m, n) = self.weight_dims[i];
             self.cl_struct.matrix_add_inline(&mut self.avg_weight[i], &mut self.weight_gradient[i]).unwrap();
-
         }
     }
 
@@ -244,8 +199,6 @@ impl NetTrait for ClNet {
         self.set_input(input);
 
         self.calculate_layers();
-
-        let (m, n) = self.layer_dims[self.last_layer];
         
         let mut r = self.cl_struct.read_buffer(&self.layers[self.last_layer]).unwrap();
         if r.len() == 1 {
@@ -284,33 +237,27 @@ impl NetTrait for ClNet {
 
     fn adapt_weights(&mut self) {
         for i in (0..=self.last_layer).rev() {
-            let (m, n) = self.bias_dims[i];
             self.cl_struct.matrix_scalar_mult(&mut self.avg_bias[i], LEARN_FACTOR).unwrap();
             self.cl_struct.matrix_sub_inline(&mut self.bias[i], &mut self.avg_bias[i]).unwrap();
 
-            let (m, n) = self.weight_dims[i];
             self.cl_struct.matrix_scalar_mult(&mut self.avg_weight[i], LEARN_FACTOR).unwrap();
             self.cl_struct.matrix_sub_inline(&mut self.weights[i], &mut self.avg_weight[i]).unwrap();
         }
         for i in 0..self.layer_count {
-            let (m, n) = self.bias_dims[i];
             self.cl_struct.fill_scalar(&self.avg_bias[i], 0.0).unwrap();
-
-            let (m, n) = self.weight_dims[i];
             self.cl_struct.fill_scalar(&self.avg_weight[i], 0.0).unwrap();
         }
     }
     
     fn set_target(&mut self, target: &Vec<f32>) {
-        self.fill_buffer_vec(&self.layers[self.last_layer], target.clone(), target.len(), 1).unwrap();
+        self.fill_buffer_vec(&self.layers[self.last_layer], target.clone()).unwrap();
     }
 
     fn set_input(&mut self, input: &Vec<f32>) {
-        self.fill_buffer_vec(&self.layers[0], input.clone(),input.len(), 1).unwrap();
+        self.fill_buffer_vec(&self.layers[0], input.clone()).unwrap();
     }
 
     fn calculate_cost(&mut self) {
-        let (m, n) = self.layer_dims[self.last_layer];
         self.cl_struct.matrix_sub(&mut self.layers[self.last_layer], &mut self.target_vector, &mut self.current_cost).unwrap();
     }
 
@@ -355,25 +302,19 @@ impl ClNet {
     }
 
     fn calculate_layer(&mut self, layer: usize) {
-        let (m, n1) = self.weight_dims[layer];
-        let (_, k) = self.layer_dims[layer - 1];
-        let n = n1;
         self.cl_struct.matrix_mult(&mut self.weights[layer], &mut self.layers[layer - 1], &mut self.pre_activation[layer]).unwrap();
         
-        let (m, n) = self.bias_dims[layer];
         self.cl_struct.matrix_add_inline(&mut self.pre_activation[layer], &mut self.bias[layer]).unwrap();
         self.calculate_activation(layer);
     }
 
     fn calculate_derivations(&mut self) {
         for i in 0..self.layer_count {
-            let (m, n) = self.active_dims[i];
             self.cl_struct.der_sigmoid(&mut self.pre_activation[i], &mut self.der_activation[i]).unwrap();
         }
     }
 
     fn calculate_activation(&mut self, layer: usize) {
-        let (r, c) = self.layer_dims[layer];
         self.cl_struct.sigmoid(&mut self.pre_activation[layer], &mut self.layers[layer]).unwrap()
     }
     
@@ -401,15 +342,15 @@ impl ClNet {
         self.cl_struct = cl_struct
     }
 
-    fn fill_buffer_vec(&self, buffer: &ClBuffer, values: Vec<f32>, m: usize, n: usize) -> Result<(), ClError> {
+    fn fill_buffer_vec(&self, buffer: &ClBuffer, values: Vec<f32>) -> Result<(), ClError> {
         self.cl_struct.fill_vec(buffer, values)
     }
 
-    fn fill_buffer_scalar(&self, buffer: &ClBuffer, val: f32, m: usize, n: usize) -> Result<(), ClError> {
+    fn fill_buffer_scalar(&self, buffer: &ClBuffer, val: f32) -> Result<(), ClError> {
         self.cl_struct.fill_scalar(buffer, val)
     }
 
-    fn fill_buffer_gauss(&self, buffer: &ClBuffer, mean: f32, variance: f32, m: usize, n: usize) -> Result<(), ClError> {
+    fn fill_buffer_gauss(&self, buffer: &ClBuffer, mean: f32, variance: f32) -> Result<(), ClError> {
         self.cl_struct.fill_gauss(buffer, mean, variance)
     }
 }
