@@ -653,6 +653,10 @@ impl ClStruct {
         Ok( Self { device, context, queue, kernels } )
     }
 
+    pub fn finish(&self) {
+        self.queue.finish().unwrap();
+    }
+
     pub fn load_program(&self, source: &str) -> Program {
         Program::create_and_build_from_source(&self.context, source, "")
             .expect("Program::create_and_build_from_source failed")
@@ -708,6 +712,9 @@ impl ClStruct {
             None => panic!("Could not find kernel in HashMap!"),
             Some(k) => {
                 let (m, n) = buffer.get_dims();
+                if values.len() > m * n {
+                    panic!("Unrecoverable error when filling a buffer!\nAttempted to fill the buffer with too many values! Can't fill a {}x{} Matrix with {} values.", m, n, values.len());
+                }
                 let mut val_bfr = self.create_buffer(m, n).ok_or(ClError(-61))?;
                 let _x_write_event = self.queue.enqueue_write_buffer(&mut val_bfr, CL_BLOCKING, 0, &values, &[])?;
     
@@ -764,7 +771,7 @@ impl ClStruct {
                 let m = m1;
                 let n = n1;
                 let k = k1;
-                let kernel_event = get_mmul_kernel_event(&kernel, &self.queue, a, b, c, m, n, k)?;
+                let kernel_event = get_mmul_kernel_event(&kernel, &self.queue, a, b, c, m, k, n)?;
                     
                 let mut events: Vec<cl_event> = Vec::default();
                 events.push(kernel_event.get());
@@ -972,8 +979,6 @@ impl ClStruct {
                     panic!("Unrecoverable error when attempting to calculate dyadic product of two matrices.\nExpected Column Vector as first argument, got a {}x{}-Matrix.", m1, n1);
                 } else if m2 != 1 {
                     panic!("Unrecoverable error when attempting to calculate dyadic product of two matrices.\nExpected Row Vector as second argument, got a {}x{}-Matrix.", m2, n2);
-                } else if m1 != n2 {
-                    panic!("Unrecoverable error when attempting to calculate dyadic product of two matrices.\nAttempted to calculate dyadic product of a {}x{}-Matrix with a {}x{}-Matrix.", m1, n1, m2, n2);
                 } else if m1 != m3 || n2 != n3 {
                     panic!("Unrecoverable error when attempting to calculate dyadic product of two matrices.\nResult dimensions are incorrect. Expected {}x{}-Matrix, got {}x{}.", m1, n2, m3, n3);
                 }
@@ -1070,7 +1075,7 @@ mod tests {
 
     use crate::{cl_kernel::*, matrix::Matrix};
 
-    const SIZE: usize = 1020;
+    const SIZE: usize = 317;
     const BUFFER_SIZE: usize = SIZE * SIZE;
 
     const V1: f32 = 4.0;
@@ -1309,9 +1314,9 @@ mod tests {
     fn test_matrix_matrix_multiplication_arbitrary() {
         let cl_struct = initialize();
 
-        let m = 578;
-        let n = 1212;
-        let k = 109;
+        let m = 191;
+        let n = 381;
+        let k = 396;
         
         let mut bfr1 = ClBuffer::new(&cl_struct, m, k);
         let mut bfr2 = ClBuffer::new(&cl_struct, k, n);
@@ -1602,7 +1607,7 @@ mod tests {
         for i in 0..(m * n) { r1[i] = normal.sample(&mut rand::thread_rng()); }
 
         let mut bfr1 = ClBuffer::new(&cl_struct, m, n);
-        let mut bfr2 = ClBuffer::new(&cl_struct, m, n);
+        let mut bfr2 = ClBuffer::new(&cl_struct, n, m);
 
         let f1 = cl_struct.fill_vec(&bfr1, r1.clone());
         assert!(f1.is_ok(), "fill_vec() did not work properly: {:?}", f1.err().unwrap());
