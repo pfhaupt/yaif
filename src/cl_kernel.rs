@@ -1020,8 +1020,8 @@ mod tests {
         let r = cl_struct.read_buffer(&bfr, BUFFER_SIZE);
         assert!(r.is_ok(), "Could not read from the buffer: {:?}", r.err().unwrap());
 
-        let s: usize = r.unwrap().iter().map(|f| *f as usize).sum();
-        assert_eq!(s, V1 as usize * BUFFER_SIZE, "fill_scalar() did not fill the whole buffer.");
+        let r2 = vec![V1; BUFFER_SIZE];
+        assert_eq!(r.unwrap(), r2, "fill_scalar() did not fill the whole buffer.");
     }
 
     #[test]
@@ -1086,9 +1086,12 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
 
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 + V2) as usize * BUFFER_SIZE;
-        assert_eq!(r, a, "matrix_add() did not work properly");
+        let mut m1 = Matrix::new(SIZE, SIZE);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(SIZE, SIZE);
+        m2.fill(V2);
+        let a = m1.add(&m2).unwrap().get_all();
+        assert_eq!(c, a, "matrix_add() did not work properly");
     }
 
     #[test]
@@ -1120,9 +1123,12 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
         
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 + V2) as usize * m * n;
-        assert_eq!(r, a, "matrix_add() did not work properly");
+        let mut m1 = Matrix::new(m, n);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(m, n);
+        m2.fill(V2);
+        let a = m1.add(&m2).unwrap().get_all();
+        assert_eq!(c, a, "matrix_add() did not work properly");
     }
     
     #[test]
@@ -1151,9 +1157,12 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
         
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 - V2) as usize * BUFFER_SIZE;
-        assert_eq!(r, a, "matrix_sub() did not work properly");
+        let mut m1 = Matrix::new(SIZE, SIZE);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(SIZE, SIZE);
+        m2.fill(V2);
+        let a = m1.sub(&m2).unwrap().get_all();
+        assert_eq!(c, a, "matrix_sub() did not work properly");
     }
 
     #[test]
@@ -1185,9 +1194,13 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
         
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 - V2) as usize * m * n;
-        assert_eq!(r, a, "matrix_sub() did not work properly");
+
+        let mut m1 = Matrix::new(m, n);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(m, n);
+        m2.fill(V2);
+        let a = m1.sub(&m2).unwrap().get_all();
+        assert_eq!(c, a, "matrix_sub() did not work properly");
     }
 
     #[test]
@@ -1216,9 +1229,12 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
 
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 * V2) as usize * (BUFFER_SIZE * SIZE);
-        assert_eq!(r, a, "matrix_mult() did not work properly");
+        let mut m1 = Matrix::new(SIZE, SIZE);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(SIZE, SIZE);
+        m2.fill(V2);
+        let a = m1.multiply(&m2).unwrap().get_all();
+        assert_eq!(c, a, "matrix_mult() did not work properly");
     }
 
     #[test]
@@ -1256,7 +1272,6 @@ mod tests {
         let mut m2 = Matrix::new(k, n);
         m2.fill(V2);
         let r1 = m1.multiply(&m2).unwrap();
-
         assert_eq!(c, r1.get_all(), "matrix_mult() did not work properly");
     }
     
@@ -1277,9 +1292,10 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
 
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 * V2) as usize * BUFFER_SIZE;
-        assert_eq!(r, a, "matrix_scalar_mult() did not work properly");
+        let mut m1 = Matrix::new(SIZE, SIZE);
+        m1.fill(V1);
+        m1.multiply_scalar(V2);
+        assert_eq!(c, m1.get_all(), "matrix_scalar_mult() did not work properly");
     }
 
     #[test]
@@ -1302,9 +1318,10 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
 
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 * V2) as usize * (m * n);
-        assert_eq!(r, a, "matrix_scalar_mult() did not work properly");
+        let mut m1 = Matrix::new(m, n);
+        m1.fill(V1);
+        m1.multiply_scalar(V2);
+        assert_eq!(c, m1.get_all(), "matrix_scalar_mult() did not work properly");
     }
     
     #[test]
@@ -1330,9 +1347,12 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
 
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 + V2) as usize * BUFFER_SIZE;
-        assert_eq!(r, a, "matrix_add() did not work properly");
+        let mut m1 = Matrix::new(SIZE, SIZE);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(SIZE, SIZE);
+        m2.fill(V2);
+        m1 = m1.add(&m2).unwrap();
+        assert_eq!(c, m1.get_all(), "matrix_add() did not work properly");
     }
 
     #[test]
@@ -1361,9 +1381,12 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
 
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 + V2) as usize * m * n;
-        assert_eq!(r, a, "matrix_add_inline() did not work properly");
+        let mut m1 = Matrix::new(m, n);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(m, n);
+        m2.fill(V2);
+        m1 = m1.add(&m2).unwrap();
+        assert_eq!(c, m1.get_all(), "matrix_add() did not work properly");
     }
      
     #[test]
@@ -1389,9 +1412,12 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
 
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 - V2) as usize * BUFFER_SIZE;
-        assert_eq!(r, a, "matrix_sub_inline() did not work properly");
+        let mut m1 = Matrix::new(SIZE, SIZE);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(SIZE, SIZE);
+        m2.fill(V2);
+        m1 = m1.sub(&m2).unwrap();
+        assert_eq!(c, m1.get_all(), "matrix_sub() did not work properly");
     }
 
     #[test]
@@ -1420,9 +1446,12 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
 
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 - V2) as usize * m * n;
-        assert_eq!(r, a, "matrix_sub_inline() did not work properly");
+        let mut m1 = Matrix::new(m, n);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(m, n);
+        m2.fill(V2);
+        m1 = m1.sub(&m2).unwrap();
+        assert_eq!(c, m1.get_all(), "matrix_sub() did not work properly");
     }
    
     #[test]
@@ -1451,9 +1480,12 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
 
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 * V2) as usize * BUFFER_SIZE;
-        assert_eq!(r, a, "matrix_hadamard() did not work properly");
+        let mut m1 = Matrix::new(SIZE, SIZE);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(SIZE, SIZE);
+        m2.fill(V2);
+        let a = m1.hadamard_product(&m2).unwrap().get_all();
+        assert_eq!(c, a, "matrix_hadamard() did not work properly");
     }
 
     #[test]
@@ -1485,9 +1517,12 @@ mod tests {
         assert!(c.is_ok(), "Could not read from the buffer: {:?}", c.err().unwrap());
         let c = c.unwrap();
 
-        let r = c.iter().map(|f| *f as usize).sum::<usize>();
-        let a = (V1 * V2) as usize * m * n;
-        assert_eq!(r, a, "matrix_hadamard() did not work properly");
+        let mut m1 = Matrix::new(m, n);
+        m1.fill(V1);
+        let mut m2 = Matrix::new(m, n);
+        m2.fill(V2);
+        let a = m1.hadamard_product(&m2).unwrap().get_all();
+        assert_eq!(c, a, "matrix_hadamard() did not work properly");
     }
     
     #[test]
@@ -1795,12 +1830,13 @@ mod tests {
         let e = cl_struct.copy_buffer(&mut from, &mut to, SIZE, SIZE);
         assert!(e.is_ok(), "copy_buffer() did not work properly: {:?}", e.err().unwrap());
 
+        let r1 = cl_struct.read_buffer(&from, BUFFER_SIZE);
+        assert!(r1.is_ok(), "read_buffer() did not work properly: {:?}", r1.err().unwrap());
+        let r1 = r1.unwrap();
         let r2 = cl_struct.read_buffer(&to, BUFFER_SIZE);
         assert!(r2.is_ok(), "read_buffer() did not work properly: {:?}", r2.err().unwrap());
         let r2 = r2.unwrap();
-
-        println!("{:?}\n{:?}", r1, r2);
-
+        
         let e = r1.iter().zip(r2.iter()).all(|(f1, f2)|(f1 - f2).abs() <= f32::EPSILON);
         assert!(e, "copy_buffer() did not work properly!");
     }
@@ -1827,6 +1863,9 @@ mod tests {
         let e = cl_struct.copy_buffer(&mut from, &mut to, m, n);
         assert!(e.is_ok(), "copy_buffer() did not work properly: {:?}", e.err().unwrap());
 
+        let r1 = cl_struct.read_buffer(&from, m * n);
+        assert!(r1.is_ok(), "read_buffer() did not work properly: {:?}", r1.err().unwrap());
+        let r1 = r1.unwrap();
         let r2 = cl_struct.read_buffer(&to, m * n);
         assert!(r2.is_ok(), "read_buffer() did not work properly: {:?}", r2.err().unwrap());
         let r2 = r2.unwrap();
